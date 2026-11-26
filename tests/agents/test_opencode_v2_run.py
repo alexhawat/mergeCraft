@@ -33,6 +33,8 @@ from mergecraft.utils.agent_resolve import FallbackReason, _classify_skip_reason
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
+    from mergecraft.utils.run_bounds import BudgetTracker
+
 
 @pytest.fixture(autouse=True)
 def _fresh_version_cache(monkeypatch: MonkeyPatch) -> None:
@@ -659,16 +661,11 @@ def test_a_failed_2x_turn_still_reports_the_tokens_it_burned(
     assert result.usage.output_tokens == 12
 
 
-def test_opencode_stream_stops_when_step_exceeds_token_ceiling(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
-    from dataclasses import replace
-
-    from mergecraft.jev.cost import TokenBudget
+def _ceiling_tracker(token_budget: int = 100) -> BudgetTracker:
     from mergecraft.utils.run_bounds import BudgetTracker, RunBounds
 
     bounds = RunBounds(
-        token_budget=100,
+        token_budget=token_budget,
         cost_budget_usd=1.0,
         tool_call_budget=10,
         run_timeout_s=60.0,
@@ -677,48 +674,75 @@ def test_opencode_stream_stops_when_step_exceeds_token_ceiling(
         external_operation_timeout_s=30.0,
         token_budget_tolerance=0.0,
     )
-    tracker = BudgetTracker(bounds)
-    stdout = (
-        json.dumps(
-            {
-                "type": "step_finish",
-                "part": {"tokens": {"input": 60, "output": 5}},
-            }
-        )
-        + "\n"
-        + json.dumps(
-            {
-                "type": "step_finish",
-                "part": {"tokens": {"input": 50, "output": 5}},
-            }
-        )
-        + "\n"
-    )
-    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
-    from mergecraft.agents.token_budget import bind_run_budget
+    return BudgetTracker(bounds)
 
+
+def _step(input_tokens: int, output_tokens: int, cost: float) -> str:
+    part = {"tokens": {"input": input_tokens, "output": output_tokens}, "cost": cost}
+    return json.dumps({"type": "step_finish", "part": part}) + "\n"
+
+
+@pytest.mark.parametrize(
+    ("steps", "stops"),
+    [
+        # 65 + 55 crosses the 100-token ceiling on the second completed step.
+        pytest.param([(60, 5, 0.01), (50, 5, 0.02)], True, id="second-step-crosses"),
+        pytest.param([(110, 10, 0.03)], True, id="first-step-crosses"),
+        pytest.param([(60, 5, 0.01), (30, 5, 0.02)], False, id="exactly-the-ceiling"),
+    ],
+)
+def test_opencode_stream_keeps_every_completed_step_when_a_ceiling_stops_it(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    steps: list[tuple[int, int, float]],
+    stops: bool,
+) -> None:
+    """#1587 — the step that trips the ceiling already ran: it is the attempt's usage too.
+
+    The stop decision is kept: no step after it is read, and the attempt is a
+    non-retryable budget stop, so no later dispatch starts. Every completed step's
+    tokens and cost count exactly once, also after the aggregate reconciliation.
+    """
+    from dataclasses import replace
+
+    from mergecraft.agents.token_budget import bind_run_budget
+    from mergecraft.jev.cost import TokenBudget
+    from mergecraft.utils.run_bounds import StreamCharges, record_agent_usage
+
+    tracker = _ceiling_tracker()
+    # When the stream stops, a step after the stop must never be read, let alone charged.
+    trailer = _step(500, 0, 0.5) if stops else ""
+    stdout = "".join(_step(*step) for step in steps) + trailer
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    charges = StreamCharges()
     ctx = replace(
         make_agent_run_context(tmp_path, resolved_model=None),
         budget_tracker=tracker,
+        stream_charges=charges,
     )
-    provider = TokenBudget(max_tokens=bounds.token_budget, advisory=False)
+    provider = TokenBudget(max_tokens=tracker.bounds.token_budget, advisory=False)
     with bind_run_budget(provider):
-        result = oc._run_opencode_cli_streaming(
-            cmd=["opencode"],
-            ctx=ctx,
-            env={},
-            session={},
-        )
+        result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={}, session={})
 
-    assert result.success is False
-    assert result.metadata.get("budget_exhausted") is True
-    assert "token budget" in (result.error or "").lower()
+    tokens = sum(step_in + step_out for step_in, step_out, _cost in steps)
+    cost = sum(step_cost for _in, _out, step_cost in steps)
     assert result.usage is not None
-    assert result.usage.input_tokens + result.usage.output_tokens == 65
-    assert (
-        "single increment" in (result.error or "").lower()
-        or "token budget" in (result.error or "").lower()
-    )
+    assert result.usage.input_tokens + result.usage.output_tokens == tokens
+    assert result.usage.cost_usd == pytest.approx(cost)
+    assert tracker.tokens_used == tokens
+    assert tracker.cost_used == pytest.approx(cost)
+    # A crossing step is a non-retryable budget stop, so no later attempt dispatches.
+    assert result.success is not stops
+    assert (result.metadata.get("budget_exhausted") is True) is stops
+    assert (result.metadata.get("retryable") is False) is stops
+    assert ("token budget" in (result.error or "").lower()) is stops
+    exhausted = tracker.last_exhausted
+    assert (exhausted.kind if exhausted is not None else None) == ("token" if stops else None)
+
+    # The final aggregate charge pays only what the stream did not already charge.
+    record_agent_usage(tracker, result.usage, phase="reviewer_dispatch", streamed=charges)
+    assert tracker.tokens_used == tokens
+    assert tracker.cost_used == pytest.approx(cost)
 
 
 def test_a_failed_2x_turn_without_stderr_names_the_exit_code(

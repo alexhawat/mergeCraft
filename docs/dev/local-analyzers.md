@@ -83,6 +83,15 @@ file. The repo's `.oxlintrc.json` / `oxlint.json` still applies, but its landmin
 the opt-in cannot be turned off from the PR head's oxlint config. Inline `oxlint-disable`
 comments still work.
 
+## Local coverage and mutation evidence
+
+`mergecraft review --with-coverage` and `--with-mutation` run the consumer's
+tools through the sandbox in the trusted local path. Each run's temporary trees
+— the sandbox scratch root, the coverage work directory and the mutation
+results directory, all created under the system temp directory as
+`mergecraft-local-*` — are removed when the run returns or raises, so repeated
+local runs do not accumulate them.
+
 ## Analyzer latency and managed caches
 
 The catalog pipeline runs up to four independent adapters concurrently. Trust,

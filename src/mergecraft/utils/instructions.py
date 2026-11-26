@@ -450,11 +450,12 @@ def resolve_instructions(
     user = str(payload.get("prompt") or "")
     fence = Fence()
     # The user prompt arrives via the operator-owned payload or action
-    # input — it is not the D8 untrusted field set. Pass it through the
-    # maintainer-exemption helper so a NON-MAINTAINER `triggerer` falls
-    # back to fencing. Today the prompt is always operator-authored; the
-    # helper is wired for the future case where triggerer `author_association`
-    # is propagated onto the prompt.
+    # input — it is not the D8 untrusted field set. The prompt is
+    # operator-owned, so it is passed verbatim: `_fence_user_prompt` declares
+    # the author as the maintainer (`author_association="OWNER"`), and
+    # `fence_unless_trusted` therefore returns it unchanged. The helper stays
+    # wired for a future surface that carries a per-trigger
+    # `author_association`.
     user_fenced = _fence_user_prompt(user, fence=fence, payload=payload)
     event_title = _build_event_title(event, fence=fence)
     event_metadata = _build_event_metadata(event, fence=fence)

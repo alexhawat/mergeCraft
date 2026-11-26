@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,15 +24,24 @@ from mergecraft.utils.process_scope import check_process_cancelled
 from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
+    from typing import IO
+
     from mergecraft.analyzers.resolve import AnalyzerPlan
     from mergecraft.analyzers.sandbox import SandboxContext
 
 CHECK_TIMEOUT_S = 300
+# Display limit: characters of the combined output shown in an outcome. The full
+# (capture-limited) output is persisted for parsers.
 MAX_OUTPUT_CHARS = 8_000
-# Per-stream ceiling on captured analyzer output that is redacted and parsed.
-# Past it the stream is cut (and the outcome says so) before any redaction, so
-# a runaway analyzer cannot make the redaction pass arbitrarily expensive.
-MAX_CAPTURED_OUTPUT_CHARS = 32 * 1024 * 1024
+# Capture limit: per-stream ceiling, in UTF-8 bytes, on analyzer output that is
+# redacted and parsed. Enforced while the pipe is read (the reader keeps only the
+# head and discards the rest), so a chatty analyzer cannot grow the parent's
+# memory; a multi-byte stream therefore keeps fewer characters than this (#1591).
+MAX_CAPTURED_OUTPUT_BYTES = 32 * 1024 * 1024
+# Read size for one pipe chunk, and the bound on joining a reader whose stream
+# never reaches EOF because a process outside the killed group still holds it.
+_CAPTURE_READ_CHARS = 64 * 1024
+_READER_JOIN_TIMEOUT_S = 5.0
 
 _SANDBOX_BOOTSTRAP_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
 _RESTORE_PAYLOAD_ENV = """set -eu
@@ -143,11 +154,27 @@ def _persist_output(
     return str(path)
 
 
+def _utf8_len(text: str) -> int:
+    """Length of *text* in UTF-8 bytes, counted as the bounded reader counts them."""
+    return len(text.encode("utf-8", "replace"))
+
+
+def _utf8_head(text: str, limit: int) -> str:
+    """The longest prefix of *text* that fits in *limit* UTF-8 bytes.
+
+    The cut never splits a character, so the result is always valid UTF-8.
+    """
+    encoded = text.encode("utf-8", "replace")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode("utf-8", "ignore")
+
+
 def _cap_captured(text: str) -> tuple[str, bool]:
     """Keep the head of one captured stream (parsers need its start); flag a cut."""
-    if len(text) <= MAX_CAPTURED_OUTPUT_CHARS:
+    if _utf8_len(text) <= MAX_CAPTURED_OUTPUT_BYTES:
         return text, False
-    return text[:MAX_CAPTURED_OUTPUT_CHARS], True
+    return _utf8_head(text, MAX_CAPTURED_OUTPUT_BYTES), True
 
 
 # Characters a credential-shaped token (or URL userinfo) is made of. A cut at any
@@ -158,14 +185,16 @@ _TOKEN_BOUNDARY_SCAN_CHARS = 4096
 
 
 def _redaction_safe_head(text: str) -> str:
-    """Return the head of an over-cap stream, cut where no value straddles the cut.
+    """Return the head of a cut stream, cut where no value straddles the cut.
 
-    The cut lands after the last complete line inside the cap. When the head is
-    one long line (minified JSON), it lands just before the last character that
-    cannot belong to a token instead. Either way the kept text stays within the cap,
-    and a quoted value the head opens but does not close is dropped as well.
+    Applies to an over-cap stream and to a stream the reader truncated: the cut
+    lands after the last complete line inside the limit, or, when the head is one
+    long line (minified JSON), just before the last character that cannot belong
+    to a token. Either way the kept text stays within the limit, and a quoted
+    value the head opens but does not close is dropped as well. The limit is
+    the capture limit in UTF-8 bytes, applied as the characters that fit in it.
     """
-    limit = MAX_CAPTURED_OUTPUT_CHARS
+    limit = len(_utf8_head(text, MAX_CAPTURED_OUTPUT_BYTES))
     newline = text.rfind("\n", 0, limit)
     if newline >= limit // 2:
         return _drop_open_quoted_value(text[:newline])
@@ -214,16 +243,17 @@ def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:
     return redact_analyzer_output(text, tool_id=plan.manifest_id) if text else text
 
 
-def _redact_captured(text: str, *, plan: AnalyzerPlan) -> tuple[str, bool]:
+def _redact_captured(text: str, *, plan: AnalyzerPlan, truncated: bool = False) -> tuple[str, bool]:
     """Redact one captured stream, keeping at most the cap; flag a cut.
 
     Redaction has to see whole credentials: a cut at an arbitrary offset can
     leave a token's prefix below every rule's minimum length, and that prefix
-    survives redaction. An over-cap stream is cut on a safe boundary first, so the
-    redactor's work stays bounded by the cap. The result is capped again only
-    after redaction, where a cut can no longer expose anything.
+    survives redaction. An over-cap stream -- and a stream the reader truncated
+    at the cap -- is cut on a safe boundary first, so the redactor sees no
+    straddling value and its work stays bounded by the cap. The result is capped
+    again only after redaction, where a cut can no longer expose anything.
     """
-    cut = len(text) > MAX_CAPTURED_OUTPUT_CHARS
+    cut = truncated or _utf8_len(text) > MAX_CAPTURED_OUTPUT_BYTES
     head = _redaction_safe_head(text) if cut else text
     redacted, recut = _cap_captured(_redact_stream(head.strip(), plan=plan))
     return redacted, cut or recut
@@ -412,6 +442,108 @@ def _requires_wrapping(
     return sandbox_context.read_only_source or egress_session is not None or netns_name is not None
 
 
+class _CapturedProcess(subprocess.CompletedProcess[str]):
+    """A completed run that also records which streams a reader had to cut."""
+
+    def __init__(
+        self,
+        args: str | list[str],
+        returncode: int,
+        stdout: str | None,
+        stderr: str | None,
+        *,
+        truncated: frozenset[str],
+    ) -> None:
+        super().__init__(args, returncode, stdout, stderr)
+        self.truncated = truncated
+
+
+class _StreamReader:
+    """One pipe's bounded reader: its retained text and whether bytes were dropped."""
+
+    def __init__(self, name: str, stream: IO[str] | None) -> None:
+        self.name = name
+        self.text = ""
+        self.truncated = False
+        self._stream = stream
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._stream is None:
+            return
+        self._thread = threading.Thread(
+            target=self._drain, name=f"analyzer-{self.name}", daemon=True
+        )
+        self._thread.start()
+
+    def _drain(self) -> None:
+        if self._stream is not None:
+            self.text, self.truncated = _read_bounded_stream(
+                self._stream, MAX_CAPTURED_OUTPUT_BYTES
+            )
+
+    @property
+    def alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def join(self, deadline: float | None = None) -> None:
+        """Wait (bounded) for this reader; a reader that outlives the wait dropped output."""
+        if self._thread is None:
+            return
+        timeout = (
+            _READER_JOIN_TIMEOUT_S if deadline is None else max(deadline - time.monotonic(), 0.0)
+        )
+        self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            self.truncated = True
+
+    def close(self) -> None:
+        """Close the pipe, unless a reader is still blocked on it."""
+        if self.alive or self._stream is None:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            self._stream.close()
+
+
+def _read_bounded_stream(stream: IO[str], cap: int) -> tuple[str, bool]:
+    """Read one pipe to EOF, keeping at most ``cap`` bytes and discarding the rest.
+
+    The cap counts UTF-8 bytes, so a multi-byte stream may retain fewer than
+    ``cap`` characters. Reading continues after the cap so the child never blocks
+    on a full pipe. Returns the retained text and whether bytes were dropped; a
+    read that ends before EOF (the parent closed the pipe after a bounded join)
+    or on undecodable bytes is a dropped tail, not a complete stream.
+    """
+    kept: list[str] = []
+    retained = 0
+    truncated = False
+    try:
+        while True:
+            chunk = stream.read(_CAPTURE_READ_CHARS)
+            if not chunk:
+                break
+            if truncated:
+                continue
+            encoded = chunk.encode("utf-8", "replace")
+            if retained + len(encoded) <= cap:
+                kept.append(chunk)
+                retained += len(encoded)
+                continue
+            truncated = True
+            remaining = cap - retained
+            if remaining > 0:
+                kept.append(encoded[:remaining].decode("utf-8", "ignore"))
+    except UnicodeDecodeError:
+        # ``text=True`` decodes strictly: undecodable bytes end this stream, and
+        # the outcome must say output was dropped rather than report a clean pass.
+        return "".join(kept), True
+    except (OSError, ValueError):
+        # The parent closed the pipe after the bounded join, so the tail was
+        # dropped: report a cut, never a complete stream.
+        return "".join(kept), True
+    return "".join(kept), truncated
+
+
 def _run_in_own_session(
     run_argv: list[str],
     *,
@@ -420,7 +552,7 @@ def _run_in_own_session(
     env: dict[str, str],
     pass_fds: tuple[int, ...],
     preexec_fn: _SandboxLimits | None,
-) -> subprocess.CompletedProcess[str]:
+) -> _CapturedProcess:
     """``subprocess.run`` that heads its own session and reaps the whole group.
 
     ``subprocess.run`` kills only the direct child on timeout, so a grandchild
@@ -428,6 +560,13 @@ def _run_in_own_session(
     and keeps the stdout/stderr pipes -- and the runner -- busy. Start the child
     as a session leader before the resource-limit launcher and namespace
     privilege drop, and ``killpg`` the group on timeout.
+
+    Both pipes are drained by one reader thread each, which keeps at most
+    ``MAX_CAPTURED_OUTPUT_BYTES`` bytes and keeps reading past the cap so the
+    child never blocks on a full pipe. The run is finished only when the child
+    has exited **and** both pipes reached EOF: a grandchild still holding a pipe
+    keeps the output incomplete, which is reported as a timeout and takes the
+    group down, exactly as ``communicate()`` treated it.
     """
     if isinstance(preexec_fn, _SandboxLimits):
         # A Python callback between fork and exec can inherit locked interpreter
@@ -448,28 +587,52 @@ def _run_in_own_session(
         pass_fds=pass_fds,
         start_new_session=True,
     )
+    readers = [
+        _StreamReader("stdout", proc.stdout),
+        _StreamReader("stderr", proc.stderr),
+    ]
     with contextlib.ExitStack() as scope:
+        deadline = time.monotonic() + timeout_s
         try:
             scope.enter_context(track_process_group(proc))
-            stdout, stderr = proc.communicate(timeout=timeout_s)
+            for reader in readers:
+                reader.start()
+            # EOF first: it arrives as soon as every writer closes, with none of
+            # the poll interval ``Popen.wait`` uses, so a killed child is seen at
+            # once. A pipe a grandchild still holds is the timeout
+            # ``communicate()`` reported, and it takes the group down below.
+            for reader in readers:
+                reader.join(deadline)
+            proc.wait(timeout=max(deadline - time.monotonic(), 0.0))
+            if any(reader.alive for reader in readers):
+                raise subprocess.TimeoutExpired(run_argv, timeout_s)
             check_process_cancelled()
         except BaseException:
             # TimeoutExpired, KeyboardInterrupt, ...: take the whole tree down.
             kill_process_group(proc.pid)
             try:
-                proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 with contextlib.suppress(OSError):
                     proc.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=1)
+            for reader in readers:
+                reader.join()
             raise
         finally:
-            # Popen.__exit__ can wait indefinitely for an unreapable child.
-            for pipe in (proc.stdin, proc.stdout, proc.stderr):
-                if pipe is not None:
-                    pipe.close()
-        return subprocess.CompletedProcess(run_argv, proc.returncode, stdout, stderr)
+            # Never close a pipe a reader is still blocked on: ``close()`` waits
+            # for that thread's lock, and the writer may never let go. A daemon
+            # reader left blocked here dies with the parent.
+            for reader in readers:
+                reader.close()
+    return _CapturedProcess(
+        run_argv,
+        proc.returncode,
+        readers[0].text,
+        readers[1].text,
+        truncated=frozenset(reader.name for reader in readers if reader.truncated),
+    )
 
 
 def _run_subprocess(
@@ -481,7 +644,7 @@ def _run_subprocess(
     preexec_fn: _SandboxLimits | None,
     command: str,
     sandboxed: bool = False,
-) -> subprocess.CompletedProcess[str] | AnalyzerOutcome:
+) -> _CapturedProcess | AnalyzerOutcome:
     """Run the analyzer subprocess; a caught timeout/OSError becomes a terminal outcome."""
     try:
         with contextlib.ExitStack() as resources:
@@ -558,15 +721,21 @@ def _outcome_from_completed(
     plan: AnalyzerPlan,
     command: str,
     output_dir: Path | None = None,
+    truncated: frozenset[str] = frozenset(),
 ) -> AnalyzerOutcome:
     """Combine stdout/stderr, redact, persist to disk, and build the final outcome.
 
-    Each stream is redacted exactly once, on input bounded by the cap, and capped
-    after redaction (:func:`_redact_captured`); the persisted parser input and the
-    display string are both built from those redacted streams.
+    Each stream is redacted exactly once, on input already bounded by the capture
+    layer (:func:`_read_bounded_stream`). A stream whose reader dropped bytes is
+    cut on a redaction-safe boundary and reported with the exceeded notice, even
+    when the retained text is under the capture limit (UTF-8 bytes).
     """
-    stdout, stdout_cut = _redact_captured(completed.stdout or "", plan=plan)
-    stderr, stderr_cut = _redact_captured(completed.stderr or "", plan=plan)
+    stdout, stdout_cut = _redact_captured(
+        completed.stdout or "", plan=plan, truncated="stdout" in truncated
+    )
+    stderr, stderr_cut = _redact_captured(
+        completed.stderr or "", plan=plan, truncated="stderr" in truncated
+    )
     for_parser = stdout or stderr
     combined = for_parser
     if stderr and stdout:
@@ -582,8 +751,8 @@ def _outcome_from_completed(
     display = _truncate(combined, output_path=output_path)
     if stdout_cut or stderr_cut:
         display = (
-            f"analyzer output exceeded {MAX_CAPTURED_OUTPUT_CHARS} chars per stream; "
-            f"the rest was dropped before parsing\n{display}"
+            f"analyzer output exceeded the capture limit of {MAX_CAPTURED_OUTPUT_BYTES} "
+            f"bytes (UTF-8) per stream; the rest was dropped before parsing\n{display}"
         )
     return AnalyzerOutcome(
         name=plan.manifest_id,
@@ -709,7 +878,13 @@ def run_plan(
         )
         if isinstance(result, AnalyzerOutcome):
             return result
-        return _outcome_from_completed(result, plan=plan, command=command, output_dir=output_dir)
+        return _outcome_from_completed(
+            result,
+            plan=plan,
+            command=command,
+            output_dir=output_dir,
+            truncated=result.truncated,
+        )
     except FilteredEgressSetupError as exc:
         return AnalyzerOutcome(
             name=plan.manifest_id,

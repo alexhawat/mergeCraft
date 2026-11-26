@@ -18,10 +18,12 @@ _CHECKOUT_DEFAULTS_PATH: Final[Path] = (
 _PACKAGED_DEFAULTS_PATH: Final[str] = "example_workflows/defaults.yaml"
 
 # G1 option B — embedded fallback when neither checkout nor wheel data is present.
+# Sync rule: every value equals defaults.yaml; make pins-check fails on drift and
+# the release refresh rewrites the minimal tag/SHA pair here too (#1594).
 _FALLBACK_DEFAULTS: Final[dict[str, str]] = {
     "action_repo": "alexhawat/mergeCraft",
-    "action_pin_minimal": "v0.1.0a1",
-    "action_sha_minimal": "521c0aedbf525a80a5bf6eddf0119ada85a8d381",
+    "action_pin_minimal": "v0.1.0a6",
+    "action_sha_minimal": "44bd67c55666303d5bd35efed5ef53868b27bb46",
     "checkout_sha": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "action_pin_hardened": "REPLACE_WITH_FULL_COMMIT_SHA",
     "ci_job_prefix": "Verify (",

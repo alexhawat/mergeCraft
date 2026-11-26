@@ -51,7 +51,7 @@ make install                 # wraps: uv sync --extra dev
 make ci-static               # lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check mcp-server-json-check
 
 # Full local check (what CI runs)
-make ci                      # ci-static + security + coverage-gate
+make ci                      # ci-static + pyright-new-tests + security + coverage-gate
 
 # Add a new runtime dependency (one-off, no target needed)
 uv add "httpx==0.28.1"       # then: make lockcheck
@@ -680,13 +680,14 @@ dev = ["pytest==9.0.3", "ruff==0.15.22", "mypy==1.20.2"]
 | `format` | `ruff format` + `ruff check --fix` |
 | `typecheck` | `mypy src/mergecraft` (strict) |
 | `pyright` | Supplemental Pyright pass |
+| `pyright-new-tests` | Pyright on test modules added since `MERGECRAFT_TEST_TYPE_BASE` (default `origin/main`), committed or not |
 | `catalog-check` | `python -m mergecraft.analyzers.catalog_docs` |
 | `test` | `pytest -m "not integration"` + xdist + split support |
 | `security` | `bandit -ll` + `pip-audit` (3 retries) |
 | `precommit` | `pre-commit run --all-files` |
 | `build` | `uv build` |
 | `ci-static` | `lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check mcp-server-json-check` |
-| `ci` | `ci-static security coverage-gate` |
+| `ci` | `ci-static pyright-new-tests security coverage-gate` |
 | `coverage-gate` | Native combined global floor plus separate critical line and branch floors |
 | `ci-steps` / `ci-resume` / `ci-reset` | Ordered step list + resumable runner (`scripts/ci_resume.sh`) |
 | `docker-build` | Build the Action image |

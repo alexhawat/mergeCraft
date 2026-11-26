@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from scripts.consumer_install_pins import METADATA, pin_paths
+from scripts.consumer_install_pins import METADATA, SECURITY_DOC, pin_paths
 from scripts.gen_llms_full import LLMS_FULL_PATHS
 
 from tests.ci.workflow_support import REPO_ROOT
@@ -14,6 +14,7 @@ from tests.ci.workflow_support import REPO_ROOT
 def copy_consumer_pin_inputs(root: Path) -> None:
     paths = {
         METADATA,
+        SECURITY_DOC,
         "scripts/consumer_install_pins.py",
         "skills-lock.json",
         "skills/harnesses.yaml",

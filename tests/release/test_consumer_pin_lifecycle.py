@@ -12,6 +12,8 @@ import pytest
 from scripts.consumer_install_pins import (
     INSTALL_PIN,
     RELEASE_DOCS,
+    SECURITY_DOC,
+    SUPPORTED_RELEASE,
     documented_release,
     pin_paths,
     plan_pin_updates,
@@ -28,6 +30,7 @@ def _assert_consumers(root: Path, expected: str, monkeypatch: pytest.MonkeyPatch
         text = path.read_text()
         assert set(INSTALL_PIN.findall(text)) == {expected}, path
         assert set(RELEASE_DOCS.findall(text)) == {expected}, path
+    assert SUPPORTED_RELEASE.findall((root / SECURITY_DOC).read_text()) == [expected]
     lock = json.loads((root / "skills-lock.json").read_text())
     for entry in lock["skills"].values():
         if entry.get("source") == "alexhawat/mergeCraft":
@@ -75,7 +78,9 @@ def test_prepare_publish_dev_and_next_release_keep_consumer_versions_coherent(
     _assert_consumers(root, "9.9.9a10", monkeypatch)
 
 
-@pytest.mark.parametrize("damage", ["stale-pin", "missing-surface", "missing-skill-lock"])
+@pytest.mark.parametrize(
+    "damage", ["stale-pin", "missing-surface", "missing-skill-lock", "stale-security-doc"]
+)
 def test_consumer_input_errors_abort_before_any_version_file_changes(
     tmp_path: Path, damage: str
 ) -> None:
@@ -85,6 +90,11 @@ def test_consumer_input_errors_abort_before_any_version_file_changes(
         path.write_text(INSTALL_PIN.sub("mergecraft-action==0.0.1", path.read_text()))
     elif damage == "missing-surface":
         path.unlink()
+    elif damage == "stale-security-doc":
+        security = root / SECURITY_DOC
+        security.write_text(
+            SUPPORTED_RELEASE.sub("pre-release (currently `0.0.1`)", security.read_text())
+        )
     else:
         (root / "skills-lock.json").write_text('{"skills": {}}\n')
     before = _snapshot(root)

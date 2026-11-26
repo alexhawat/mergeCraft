@@ -34,9 +34,11 @@ from mergecraft.config.io import save_config_dict as _write_config_dict
 from mergecraft.config.layered import config_parse_error
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
+    InvalidEnvIndexError,
     allocate_env_index,
     default_auth_kind_for_label,
     default_harness_for_label,
+    entry_env_index,
     harness_supports_provider,
     list_supported_harnesses,
     supported_harness_names,
@@ -89,8 +91,6 @@ CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 BEDROCK_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("AWS_REGION", "AWS_DEFAULT_REGION")
 VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION")
 
-STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
-
 ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset()
 
 # Highest env index ``provider delete`` has freed; see ``allocate_env_index`` (D3).
@@ -102,14 +102,6 @@ _INDEXED_ENV_KEY_RE = re.compile(
 )
 # Reads an env index exactly as ``RepoSettings`` validates one.
 _ENV_INDEX: TypeAdapter[int] = TypeAdapter(NonNegativeInt)
-
-CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
-    "api_key",
-    "apiKey",
-    "secret",
-    "password",
-    "token",
-)
 
 _LEGACY_CREDENTIAL_WARNED_KEYS: set[str] = set()
 
@@ -172,6 +164,24 @@ def _env_path(cwd: Path | None = None) -> Path:
     return local_env_path_for_process_cwd()
 
 
+def _auth_repo_root(cwd: Path | None) -> Path:
+    """Return the directory that holds the provider registry for an auth write.
+
+    An explicit ``--cwd`` wins, exactly as it does for every other ``provider``
+    command; an omitted one means the checkout root, which is also where the
+    legacy commands' ``.env`` lands. The registry deliberately does *not* follow
+    ``MERGECRAFT_ENV``: that override names the ``.env`` only (see
+    :mod:`mergecraft.cli.local_env`), while ``--cwd`` owns the repository config
+    — pairing the registry to the override would make a pinned env file silently
+    disable the indexed path (#1557).
+    """
+    if cwd is not None:
+        return cwd
+    from mergecraft.cli.target_dir import implicit_repo_root
+
+    return implicit_repo_root()
+
+
 def _load_config_dict(path: Path) -> dict[str, Any]:
     """Load the repo config mapping for a CLI read or write.
 
@@ -232,19 +242,94 @@ def allocate_registry_env_index(
     *,
     env_path: Path | None = None,
 ) -> int:
-    """Allocate the next env index for the registry in *data*; never a freed one (D3)."""
-    return allocate_env_index(
-        entries,
-        high_water=_env_index_high_water(data),
-        occupied=_occupied_env_indices(env_path),
-    )
+    """Allocate the next env index for the registry in *data*; never a freed one (D3).
+
+    A row whose ``envIndex`` is not an integer exits with the configuration code
+    and names the provider, instead of a traceback (#1592).
+    """
+    try:
+        return allocate_env_index(
+            entries,
+            high_water=_env_index_high_water(data),
+            occupied=_occupied_env_indices(env_path),
+        )
+    except InvalidEnvIndexError as exc:
+        cli_bail(str(exc))
+
+
+def registry_env_index(entry: Mapping[str, Any]) -> int:
+    """Return a registry row's ``envIndex``, or exit with the configuration code.
+
+    The message names the provider and the ``envIndex`` field (#1592).
+    """
+    try:
+        return entry_env_index(entry)
+    except InvalidEnvIndexError as exc:
+        cli_bail(str(exc))
+
+
+class ProviderLabelWriteError(OSError):
+    """The local ``LLM_PROVIDER_<N>`` label of a new registration did not land."""
 
 
 def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> None:
+    """Write ``LLM_PROVIDER_<N>=<label>`` into the ``.env`` paired with *cwd*.
+
+    Raises:
+        ProviderLabelWriteError: When the ``.env`` write failed.
+    """
     from mergecraft.cli.auth_cmd import _write_env_value
 
-    key = f"LLM_PROVIDER_{env_index}"
-    _write_env_value(_env_path(cwd), key, label)
+    key = _indexed_label_key(env_index)
+    env_path = _env_path(cwd)
+    if not _write_env_value(env_path, key, label):
+        msg = f"could not write {key} to {env_path}"
+        raise ProviderLabelWriteError(msg)
+
+
+def _restore_env_file(env_path: Path, before: bytes | None) -> None:
+    """Put *env_path* back exactly as it was: *before* bytes, or absent when ``None``."""
+    try:
+        if before is None:
+            env_path.unlink(missing_ok=True)
+        else:
+            env_path.write_bytes(before)
+    except OSError as exc:
+        console.print(f"[yellow]could not restore {env_path}: {exc}[/yellow]")
+
+
+def register_provider_entry(
+    config_path: Path,
+    data: dict[str, Any],
+    entries: list[dict[str, Any]],
+    entry: dict[str, Any],
+    *,
+    cwd: Path | None,
+    write_config: Callable[[Path, dict[str, Any]], None],
+) -> None:
+    """Persist a new registry row and its local ``.env`` label, or neither (#1593).
+
+    The label is written first, after snapshotting the ``.env`` it goes into.
+    When the config write then fails, the snapshot is restored byte for byte,
+    and a ``.env`` the label write created is removed again. A label write that
+    fails leaves both files as they were, so repeating the command allocates the
+    same index; writing the row first would strand it and make the retry fail
+    the duplicate-label check.
+
+    Raises:
+        ProviderLabelWriteError: When the label write failed; nothing was written.
+    """
+    env_index = int(entry["envIndex"])
+    env_path = _env_path(cwd)
+    env_before = env_path.read_bytes() if env_path.is_file() else None
+    try:
+        _write_env_label(env_index, str(entry["label"]), cwd)
+        write_config(config_path, {**data, "providers": [*entries, entry]})
+    except BaseException:
+        _restore_env_file(env_path, env_before)
+        raise
+    entries.append(entry)
+    data["providers"] = entries
 
 
 def _harness_help_suffix() -> str:
@@ -393,10 +478,22 @@ def add_cmd(
     if resolved_url is not None:
         entry["url"] = resolved_url
 
-    entries.append(entry)
-    data["providers"] = entries
-    _write_config_dict(config_path, data)
-    _write_env_label(env_index, normalised_label, repo_root)
+    try:
+        register_provider_entry(
+            config_path,
+            data,
+            entries,
+            entry,
+            cwd=repo_root,
+            write_config=_write_config_dict,
+        )
+    except ProviderLabelWriteError as exc:
+        cli_bail(f"{exc}; provider {normalised_label!r} was not registered")
+    except OSError as exc:
+        cli_bail(
+            f"could not write {config_path}: {exc}; provider {normalised_label!r} "
+            "was not registered"
+        )
     console.print(
         f"registered provider [green]{normalised_label}[/green] "
         f"(envIndex={env_index}, harness={resolved_harness})"
@@ -479,6 +576,11 @@ def delete_cmd(
     console.print(f"deleted provider [green]{label}[/green]")
 
 
+def _indexed_key(env_index: int, suffix: str) -> str:
+    """Return one ``LLM_PROVIDER_<N>_<SUFFIX>`` key."""
+    return f"LLM_PROVIDER_{env_index}_{suffix}"
+
+
 def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
     """Return indexed ``LLM_PROVIDER_<N>_<SUFFIX>`` keys for *entry* (#478)."""
     env_index = int(entry["envIndex"])
@@ -499,7 +601,7 @@ def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
         suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
         suffixes = (suffix,)
 
-    return [f"LLM_PROVIDER_{env_index}_{suffix}" for suffix in suffixes]
+    return [_indexed_key(env_index, suffix) for suffix in suffixes]
 
 
 @dataclass(frozen=True, slots=True)
@@ -558,6 +660,7 @@ def _persist_indexed_credentials(
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
     target = target or _resolve_auth_target(scope, cwd=cwd)
+    seed_root = _auth_repo_root(cwd)
 
     env_path = target.env_path or _env_path(cwd)
     label_key = _indexed_label_key(env_index)
@@ -567,19 +670,21 @@ def _persist_indexed_credentials(
         if not _write_env_value(env_path, label_key, label):
             cli_bail(f"could not write {label_key} to {env_path}")
         for suffix, raw_value in credential_map.items():
-            key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            key = _indexed_key(env_index, suffix)
             value = _single_line_credential(name=key, value=raw_value)
             if not _write_env_value(env_path, key, value):
                 cli_bail(f"could not write {key} to {env_path}")
-        landed = ", ".join([label_key, *credential_map.keys()])
+        # Name the indexed keys actually written, not the bare suffixes: the
+        # legacy flat path prints the same suffix names otherwise (#1557).
+        landed = ", ".join([label_key, *(_indexed_key(env_index, s) for s in credential_map)])
         console.print(f"[green]wrote {landed}[/green] to {env_path}")
         any_local_written = True
-        seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
+        seed_reviewer_p0_after_auth(cwd=seed_root, provider_label=label)
 
     if target.github is not None:
         wrote_any_github = False
         for suffix, raw_value in credential_map.items():
-            key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            key = _indexed_key(env_index, suffix)
             value = _single_line_credential(name=key, value=raw_value)
             console.print(f"saving [cyan]{key}[/cyan] via gh secret set...")
             if _set_gh_secret(name=key, value=value, repo_slug=target.github.repo_slug):
@@ -604,19 +709,24 @@ def _persist_indexed_credentials(
                 "retry with --scope local or --scope github to isolate the failure."
             )
         if wrote_any_github:
-            from mergecraft.cli.target_dir import implicit_repo_root
             from mergecraft.cli.workflow_cmd import wire_authenticated_provider
 
-            seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
+            seed_reviewer_p0_after_auth(cwd=seed_root, provider_label=label)
             # The stored secret only reaches CI once the workflow passes it on.
-            wire_authenticated_provider((cwd or implicit_repo_root()).resolve(), entry)
+            wire_authenticated_provider(seed_root.resolve(), entry)
         return
 
     if not any_local_written:
         cli_bail("nothing was written — could not save indexed credentials locally.")
 
 
-def _cancelable_getpass(prompt: str) -> str | None:
+def _cancelable_getpass(prompt: str) -> str:
+    """Prompt for a secret; a cancel raises instead of returning ``None``.
+
+    Both cancel paths (EOF/KeyboardInterrupt and an empty entry) print
+    ``canceled.`` and raise ``typer.Exit(0)``, so every caller receives a
+    non-empty string and needs no ``None`` guard.
+    """
     try:
         value = getpass.getpass(prompt).strip()
     except (EOFError, KeyboardInterrupt):
@@ -667,8 +777,6 @@ def _run_api_key_strategy(
     url_str = str(url) if url is not None else None
     console.print(f"paste the API key for provider [cyan]{label}[/cyan] below.")
     api_key = _cancelable_getpass(f"{label} API key (Enter to cancel): ")
-    if api_key is None:
-        return
     if not _validate_api_key_for_label(label, api_key, url_str):
         cli_bail(f"{label} API key validation failed (401/403). Check the key and retry.")
     _persist_indexed_credentials(
@@ -694,8 +802,6 @@ def _run_oauth_strategy(
         f"(expected prefix [cyan]{CLAUDE_OAUTH_TOKEN_PREFIX}…[/cyan])."
     )
     oauth_token = _cancelable_getpass("Claude Code OAuth token (Enter to cancel): ")
-    if oauth_token is None:
-        return
     if not oauth_token.startswith(CLAUDE_OAUTH_TOKEN_PREFIX):
         console.print(
             f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
@@ -754,11 +860,6 @@ def _run_opencode_zen_strategy(
         "(OpenCode Zen billing — same console for OpenCode Go), then paste it below."
     )
     api_key = _cancelable_getpass("OpenCode Zen API key (Enter to cancel): ")
-    if api_key is None:
-        return
-    if not api_key.strip():
-        console.print("canceled.")
-        return
     auth_json = build_opencode_zen_auth_json(api_key)
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OPENCODE_ZEN]
     _persist_indexed_credentials(entry, scope, {suffix: auth_json}, cwd=cwd, target=target)
@@ -777,8 +878,6 @@ def _run_cloud_chain_strategy(
         for suffix in BEDROCK_CLOUD_SUFFIXES:
             prompt_label = suffix.replace("_", " ")
             value = _cancelable_getpass(f"{prompt_label} (Enter to cancel): ")
-            if value is None:
-                return
             credentials[suffix] = value
         _persist_indexed_credentials(entry, scope, credentials, cwd=cwd, target=target)
         return
@@ -800,8 +899,6 @@ def _run_cloud_chain_strategy(
             return
 
         pasted = _cancelable_getpass("Paste service account JSON (Enter to cancel): ")
-        if pasted is None:
-            return
         if "\n" in pasted:
             cli_bail(
                 "VERTEX_SERVICE_ACCOUNT_JSON spans multiple lines — refusing to write a "
@@ -907,47 +1004,6 @@ def migration_secret_fingerprint(value: str) -> str:
     if len(stripped) <= 4:
         return "…"
     return f"…{stripped[-4:]}"
-
-
-def validate_config_secret_split(
-    config_path: Path,
-    env_path: Path,
-) -> list[str]:
-    """Return violations when credentials leak into config or structure leaks into ``.env``."""
-    violations: list[str] = []
-    if config_path.is_file():
-        config_data = _load_config_dict(config_path)
-        for entry in _provider_entries(config_data):
-            for key, value in entry.items():
-                key_lower = str(key).lower()
-                if any(token.lower() in key_lower for token in CREDENTIAL_SUBSTRINGS_IN_CONFIG):
-                    violations.append(
-                        f"config provider {entry.get('label', '?')!r} contains credential field {key!r}"
-                    )
-                if isinstance(value, str) and value.strip():
-                    value_lower = value.lower()
-                    if any(token in value_lower for token in ("sk-", "apikey", "secret")):
-                        violations.append(
-                            f"config provider {entry.get('label', '?')!r} may contain a credential value"
-                        )
-
-    if env_path.is_file():
-        for raw in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key = line.split("=", 1)[0].strip()
-            key_lower = key.lower()
-            if key_lower in STRUCTURE_KEYS_IN_ENV:
-                violations.append(f".env contains structure key {key!r} (move to config.yaml)")
-            if any(token.lower() in key_lower for token in CREDENTIAL_SUBSTRINGS_IN_CONFIG):
-                if key.startswith("LLM_PROVIDER_"):
-                    continue
-                if key in LEGACY_API_KEY_MIGRATIONS:
-                    continue
-                if key in BEDROCK_CLOUD_SUFFIXES or key in VERTEX_CLOUD_SUFFIXES:
-                    continue
-    return violations
 
 
 def _indexed_value(env_map: Mapping[str, str], env_index: int, suffix: str) -> str | None:
@@ -1301,7 +1357,7 @@ def persist_legacy_indexed_auth(
     target: AuthTarget | None = None,
 ) -> bool:
     """Write *credential_map* via the indexed provider path when *label* is registered."""
-    config_path = _config_path(Path.cwd())
+    config_path = _config_path(_auth_repo_root(None))
     registry = load_provider_registry(config_path)
     entry = registry.lookup(label)
     if entry is None:
@@ -1414,5 +1470,4 @@ __all__ = [
     "resolve_provider_harness",
     "run_provider_auth",
     "seed_builtin_providers",
-    "validate_config_secret_split",
 ]

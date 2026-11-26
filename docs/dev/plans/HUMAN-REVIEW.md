@@ -12,4 +12,6 @@ Use the [batch 001 review sheet](../../../evals/adjudication/golden-batch-001-re
 for the original claims. `make eval-human-batch` still renders its manifest and
 marks every row UNANSWERED; those rows no longer need a response. The
 [batch 002 review packet](../../../evals/adjudication/golden-batch-002-review.md)
-is the one awaiting human decisions.
+was answered on 2026-11-25: `alexhawat` confirmed all nine cases, as its
+[manifest](../../../evals/adjudication/golden-batch-002.json) records. No packet
+is awaiting human decisions.

@@ -3,11 +3,12 @@
 
 Two copies of the shared defaults exist — the checkout source of truth under
 ``scripts/example_workflows/`` and the packaged copy under
-``src/mergecraft/data/example_workflows/``. A workflow renders the immutable
-``action_sha_minimal`` commit while Harbor installs mergeCraft by the release
-``action_pin_minimal`` tag, so the two are updated by hand and can rot apart.
-This script fails when the copies drift and when the SHA does not equal the
-commit the tag resolves to.
+``src/mergecraft/data/example_workflows/`` — plus the embedded fallback in
+``src/mergecraft/pins.py`` that an install without either file uses. A workflow
+renders the immutable ``action_sha_minimal`` commit while Harbor installs
+mergeCraft by the release ``action_pin_minimal`` tag, so the two are updated by
+hand and can rot apart. This script fails when the copies or the fallback drift
+and when the SHA does not equal the commit the tag resolves to.
 
 The tag comparison runs a live ``git ls-remote``; when the remote cannot be
 reached it prints a notice and skips that half, so a local ``make pins-check``
@@ -17,7 +18,7 @@ not exist, so there is no commit to agree with. The offline half — the recorde
 capture — is exercised by the pins test suite.
 
 Module: scripts.check_example_defaults_sync
-Depends: argparse, subprocess, sys, pathlib, typing, yaml
+Depends: argparse, ast, subprocess, sys, pathlib, typing, yaml
 
 Exports:
     main — CLI entry; byte-identity and tag/commit agreement for the defaults.
@@ -26,6 +27,7 @@ Exports:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -39,6 +41,9 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 CHECKOUT_DEFAULTS = REPO / "scripts" / "example_workflows" / "defaults.yaml"
 PACKAGED_DEFAULTS = REPO / "src" / "mergecraft" / "data" / "example_workflows" / "defaults.yaml"
+EMBEDDED_FALLBACK = REPO / "src" / "mergecraft" / "pins.py"
+_FALLBACK_NAME = "_FALLBACK_DEFAULTS"
+_RELEASE_PAIR = ("action_pin_minimal", "action_sha_minimal")
 _DEFAULT_REMOTE = "origin"
 
 
@@ -62,6 +67,67 @@ def _check_byte_identity() -> list[str]:
             "sync the packaged copy, then make pins-check)"
         ]
     return []
+
+
+def _fallback_node(source: str) -> ast.stmt | None:
+    """The module-level statement that assigns ``_FALLBACK_DEFAULTS`` in *source*."""
+    for node in ast.parse(source).body:
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == _FALLBACK_NAME:
+            return node
+    return None
+
+
+def _embedded_fallback(source: str) -> dict[str, str] | None:
+    """Read ``_FALLBACK_DEFAULTS`` from ``pins.py`` source without importing it."""
+    node = _fallback_node(source)
+    value = getattr(node, "value", None)
+    if value is None:
+        return None
+    literal = ast.literal_eval(value)
+    if not isinstance(literal, dict):
+        return None
+    return {str(key): str(val) for key, val in literal.items()}
+
+
+def _check_embedded_fallback(defaults: dict[str, Any]) -> list[str]:
+    """Return drift messages when the embedded fallback differs from ``defaults.yaml``."""
+    name = EMBEDDED_FALLBACK.relative_to(REPO).as_posix()
+    if not EMBEDDED_FALLBACK.is_file():
+        return [f"missing {name}"]
+    fallback = _embedded_fallback(EMBEDDED_FALLBACK.read_text(encoding="utf-8"))
+    if fallback is None:
+        return [f"{name} must define {_FALLBACK_NAME} as a literal mapping"]
+    expected = {str(key): str(value) for key, value in defaults.items()}
+    return [
+        f"{name} {_FALLBACK_NAME}[{key!r}] is {fallback.get(key)!r}, "
+        f"defaults.yaml has {expected.get(key)!r}"
+        for key in sorted(expected.keys() | fallback.keys())
+        if fallback.get(key) != expected.get(key)
+    ]
+
+
+def _refreshed_fallback_source(source: str, tag: str, sha: str) -> tuple[str, list[str]]:
+    """Rewrite the release pair inside ``_FALLBACK_DEFAULTS`` in *source*.
+
+    Only the assignment's own lines are edited: the same keys also appear in the
+    module's environment-override map, which must keep its variable names.
+    """
+    name = EMBEDDED_FALLBACK.relative_to(REPO).as_posix()
+    node = _fallback_node(source)
+    if node is None or node.end_lineno is None:
+        return source, [f"{name} must define {_FALLBACK_NAME}"]
+    lines = source.splitlines(keepends=True)
+    block = "".join(lines[node.lineno - 1 : node.end_lineno])
+    failures = []
+    for key, value in zip(_RELEASE_PAIR, (tag, sha), strict=True):
+        block, count = re.subn(rf'("{key}": ")[^"\n]*(")', rf"\g<1>{value}\g<2>", block)
+        if count != 1:
+            failures.append(f"{name} must set {key} once in {_FALLBACK_NAME}, found {count}")
+    refreshed = "".join([*lines[: node.lineno - 1], block, *lines[node.end_lineno :]])
+    return refreshed, failures
 
 
 class _TagResolution(NamedTuple):
@@ -126,6 +192,7 @@ _ACTION_REF = re.compile(
     r"(?m)^([ \t]*(?:-[ \t]+)?uses: alexhawat/mergeCraft@)([\w./-]+)(?:[ \t]+#[^\n]*)?[ \t]*$"
 )
 _ACTION_SHA_ENV = re.compile(r"(?m)^([ \t]*MERGECRAFT_ACTION_SHA: )([0-9a-fA-F]{40})[ \t]*$")
+_EVALS_DEFAULT_REF = re.compile(r"(\(default ref `)v[^`\s]+(`)")
 _PIN_DOCS = {"README.md", "docs/workflows.md", "docs/authentication.md", "docs/evidence-packet.md"}
 
 
@@ -155,13 +222,24 @@ def _refresh_release(tag: str, remote: str, defaults: dict[str, Any]) -> None:
         raise SystemExit(f"cannot refresh consumer pins without a published {tag}")
     sha = lookup.commit
     text = CHECKOUT_DEFAULTS.read_text(encoding="utf-8")
-    for key, value in (("action_pin_minimal", tag), ("action_sha_minimal", sha)):
+    for key, value in zip(_RELEASE_PAIR, (tag, sha), strict=True):
         text = text.replace(f"{key}: {defaults[key]}\n", f"{key}: {value}\n")
     failures = _document_pins(tag, sha, refresh=True)
+    fallback_source, fallback_failures = _refreshed_fallback_source(
+        EMBEDDED_FALLBACK.read_text(encoding="utf-8"), tag, sha
+    )
+    failures.extend(fallback_failures)
+    evals_readme = REPO / "evals/README.md"
+    evals_old = evals_readme.read_text(encoding="utf-8")
+    evals_new, count = _EVALS_DEFAULT_REF.subn(lambda m: f"{m[1]}{tag}{m[2]}", evals_old)
+    if count != 1:
+        failures.append(f"evals/README.md must name the default install ref once, found {count}")
     if failures:
         raise SystemExit("\n".join(failures))
+    evals_readme.write_text(evals_new, encoding="utf-8")
     for path in (CHECKOUT_DEFAULTS, PACKAGED_DEFAULTS):
         path.write_text(text, encoding="utf-8")
+    EMBEDDED_FALLBACK.write_text(fallback_source, encoding="utf-8")
     capture = REPO / "tests/pins/fixtures/git_ls_remote_tags.txt"
     capture.write_text(f"{sha}\trefs/tags/{tag}\n", encoding="utf-8")
 
@@ -183,6 +261,7 @@ def main() -> int:
 
     failures = _check_byte_identity()
     defaults = _load(CHECKOUT_DEFAULTS)
+    failures.extend(_check_embedded_fallback(defaults))
     release = json.loads((REPO / "docs/consumer-release.json").read_text())["version"]
     if args.refresh_release:
         _refresh_release(f"v{release}", args.remote, defaults)
