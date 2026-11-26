@@ -1,4 +1,12 @@
-"""Skip agent dispatch when this exact head SHA already has a trusted review (#1490)."""
+"""Skip agent dispatch when this exact head SHA already has requested changes (#1490).
+
+The skip reuses only a blocking verdict. A pass on the same head is reviewed again:
+the authenticated review history proves who reviewed the head, but not that the
+review still applies (the base can move without the head changing), so it cannot
+grant approval. Carrying a pass over needs the re-approval proof instead
+(:mod:`mergecraft.reapproval`: a trusted App's check and the review-policy stamp).
+Reusing requested changes can only keep a merge blocked, never unblock one.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +49,7 @@ async def evaluate_same_head_skip(
 
     reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
     prior = trusted_completed_review_on_head(reviews, head_sha)
-    if prior is None:
+    if prior is None or str(prior.get("state")).upper() != "CHANGES_REQUESTED":
         return None
     review_id = prior.get("id")
     pointer = f"prior review on `{head_sha[:12]}`"
@@ -54,8 +62,9 @@ async def evaluate_same_head_skip(
         pointer += f" ({url})"
         relied_on = (url,)
     reason = (
-        "This head SHA already has a trusted mergeCraft review; "
-        f"reusing {pointer} instead of dispatching the agent again."
+        "This head SHA already has a trusted mergeCraft review that requested changes; "
+        f"reusing {pointer} instead of dispatching the agent again. Push a commit or "
+        "dispatch a review to get a new one."
     )
     return TriageDecision(
         tier="skip", recognizer=SAME_HEAD_RECOGNIZER, reason=reason, relied_on_checks=relied_on
