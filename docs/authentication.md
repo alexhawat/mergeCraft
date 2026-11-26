@@ -228,7 +228,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -295,7 +295,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -375,7 +375,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -406,7 +406,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]

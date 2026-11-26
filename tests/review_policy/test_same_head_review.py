@@ -83,7 +83,7 @@ async def test_same_head_skip_without_numeric_review_id(
         return [
             {
                 "commit_id": sha,
-                "state": "APPROVED",
+                "state": "CHANGES_REQUESTED",
                 "body": _completed_body(),
                 "id": review_id,
                 "html_url": "https://example.com/?token=review-url-canary",
@@ -96,3 +96,50 @@ async def test_same_head_skip_without_numeric_review_id(
     assert f"prior review on `{sha[:12]}`" in decision.reason
     assert "review-url-canary" not in decision.reason
     assert decision.relied_on_checks == ()
+
+
+@pytest.mark.parametrize(
+    ("state", "skips"),
+    [
+        pytest.param("APPROVED", False, id="approved-is-reviewed-again"),
+        pytest.param("COMMENTED", False, id="passed-record-is-reviewed-again"),
+        pytest.param("CHANGES_REQUESTED", True, id="changes-requested-is-reused"),
+    ],
+)
+async def test_same_head_skip_reuses_only_requested_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, *, skips: bool
+) -> None:
+    """A pass on the same head never skips: the skip has no proof to grant approval."""
+    from mergecraft.review_policy.same_head_review import evaluate_same_head_skip
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx
+
+    sha = "f" * 40
+    tctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
+
+    async def _fake_list(_ctx: object, *, pull_number: int) -> list[dict[str, Any]]:
+        return [{"commit_id": sha, "state": state, "body": _completed_body(), "id": 9}]
+
+    monkeypatch.setattr("mergecraft.mcp.checkout.list_mergecraft_reviews", _fake_list)
+    decision = await evaluate_same_head_skip(tctx, head_sha=sha, pull_number=7)
+    assert (decision is not None) is skips
+    assert skips is ("requested changes" in getattr(decision, "reason", ""))
+
+
+async def test_a_later_pass_on_the_same_head_is_reviewed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the newest completed review counts: a pass after requested changes reviews."""
+    from mergecraft.review_policy.same_head_review import evaluate_same_head_skip
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx
+
+    sha = "d" * 40
+    tctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
+
+    async def _fake_list(_ctx: object, *, pull_number: int) -> list[dict[str, Any]]:
+        return [
+            {"commit_id": sha, "state": "CHANGES_REQUESTED", "body": "", "id": 1},
+            {"commit_id": sha, "state": "APPROVED", "body": "", "id": 2},
+        ]
+
+    monkeypatch.setattr("mergecraft.mcp.checkout.list_mergecraft_reviews", _fake_list)
+    assert await evaluate_same_head_skip(tctx, head_sha=sha, pull_number=7) is None

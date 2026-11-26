@@ -369,7 +369,7 @@ async def _run_lite_tier(
 
 
 async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
-    """Skip the agent when this exact head SHA already has a trusted completed review (#1490)."""
+    """Skip the agent when this exact head SHA already has trusted requested changes (#1490)."""
     assert ctx.tool_state is not None
     assert ctx.tool_context is not None
     from mergecraft.config.trust_policy import bound_head_sha
@@ -389,9 +389,12 @@ async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
     if decision is None:
         return None
     ctx.tool_state.triage = decision
-    logger.warning("» {} — trusted review already on this head SHA", decision.record_line())
+    logger.warning(
+        "» {} — trusted requested changes already on this head SHA", decision.record_line()
+    )
     gha_log.notice(
-        "mergeCraft: This head SHA already has a trusted review. Skipping agent dispatch."
+        "mergeCraft: This head SHA already has a trusted review that requested changes. "
+        "Skipping agent dispatch."
     )
     return SkipAgentReview(reason=decision.reason)
 

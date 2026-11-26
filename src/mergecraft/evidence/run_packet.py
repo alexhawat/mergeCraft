@@ -608,6 +608,7 @@ def _finalize_packet_with_gate(
 ) -> MergeEvidencePacket:
     """Attach structural verdict and gate action to an assembled packet."""
     from mergecraft.agents.gates import decide_action, decide_approval
+    from mergecraft.review_policy.same_head_review import SAME_HEAD_RECOGNIZER
 
     gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
@@ -633,6 +634,25 @@ def _finalize_packet_with_gate(
                 "reason": (
                     f"re-approved: the mergeCraft pass on {reapproval.prior_head_sha} "
                     f"carries over ({reapproval.prior_url})"
+                ),
+            }
+        )
+    elif (
+        triage_tier == "skip"
+        and packet.triage is not None
+        and packet.triage.recognizer == SAME_HEAD_RECOGNIZER
+    ):
+        # A same-head skip (#1490) reuses requested changes on this exact head, and
+        # only those (a pass is reviewed again). The reused verdict is a blocker: a
+        # neutral here would fail the approval gate as "requested changes" without
+        # saying so, and a success would grant approval no new review earned.
+        prior = ", ".join(packet.triage.relied_on_checks) or "the prior review"
+        decision = decision.model_copy(
+            update={
+                "verdict": "failure",
+                "reason": (
+                    f"changes requested on this head still stand ({prior}); push a commit "
+                    "or dispatch a review to get a new one"
                 ),
             }
         )

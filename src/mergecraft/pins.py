@@ -22,8 +22,8 @@ _PACKAGED_DEFAULTS_PATH: Final[str] = "example_workflows/defaults.yaml"
 # the release refresh rewrites the minimal tag/SHA pair here too (#1594).
 _FALLBACK_DEFAULTS: Final[dict[str, str]] = {
     "action_repo": "alexhawat/mergeCraft",
-    "action_pin_minimal": "v0.1.0a6",
-    "action_sha_minimal": "44bd67c55666303d5bd35efed5ef53868b27bb46",
+    "action_pin_minimal": "v0.1.0a7",
+    "action_sha_minimal": "ca65b4c95c7afbbefa58033cea1b31b1197d0372",
     "checkout_sha": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "action_pin_hardened": "REPLACE_WITH_FULL_COMMIT_SHA",
     "ci_job_prefix": "Verify (",

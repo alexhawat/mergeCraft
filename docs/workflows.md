@@ -162,7 +162,7 @@ permissions:
 jobs:
   review:
     steps:
-      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+      - uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
         with:
           sarif_upload: enabled
 ```
@@ -180,7 +180,7 @@ Every run can emit a per-request span tree — to local JSONL, to
 default:
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     tracing: enabled
     tracing-to: logfire
@@ -381,7 +381,7 @@ on:
       - "host/evals/**/*.jsonl"
       - "CHANGELOG.md"
 # ...
-      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+      - uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
         with:
           # Leave these out of the diff the reviewer sees on a mixed PR.
           # Newline- or comma-separated globs; `**` crosses directories.
@@ -492,6 +492,13 @@ review:
   still trigger a review if the workflow sends those events. Missing or
   unverifiable review history allows a review.
   `onRequest` suppresses automatic PR reviews, including ready events.
+- Whatever the frequency, a run on a head SHA whose newest verified mergeCraft
+  review requested changes does not review it again. It links that review and
+  reports a failing `mergecraft-approval` check, so a re-run cannot clear or hide
+  the request. A head whose newest review passed is reviewed again: carrying a
+  pass over needs the proof `review.fastPath.reapproval` checks
+  ([review checks](REVIEW-CHECKS.md)). Push a commit or use an
+  authorized manual dispatch to get a new review of a blocked head.
 
 The Action reads these settings from the base checkout for
 `pull_request_target` and the pinned base commit for `pull_request`. If it
