@@ -406,8 +406,11 @@ record, never grants approval, only counts a pin bump when its verifying check
 passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
 name alone is set by its creator), reads its config from the base ref only, and
 treats any failure to read the pull request as a reason to review.
-`review.fastPath.reapproval` is the one triage outcome that carries a verdict:
-it reuses a trusted earlier pass, never invents one. It applies only when the new
+`review.fastPath.reapproval` is the one triage outcome that carries a pass:
+it reuses a trusted earlier pass, never invents one. The same-head skip carries
+only a block: it reuses requested changes from the newest verified review of the
+same head SHA as a failing check, and a head whose newest review passed is
+reviewed again. It applies only when the new
 head's PR-authored changes are the reviewed ones byte for byte plus changelog
 prose, proven against the base, the reviewed head and the new head, and it says
 on the check which pass it reused and what it skipped.

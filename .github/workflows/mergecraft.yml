@@ -1483,18 +1483,14 @@ jobs:
   #
   # `review_event: comment` makes the action publish every verdict as a COMMENT
   # review and skip resolving review threads, so Sonnet can neither block nor
-  # unblock a merge. The input is new in this repo's action.yml; the pinned
-  # action below (`26b6b5c6`) predates it and ignores it with an "Unexpected
-  # input" warning. Until MERGECRAFT_ACTION_SHA is bumped to a commit (and
-  # image) that has it, a request_changes verdict still posts a REQUEST_CHANGES
-  # review that blocks the merge; a maintainer dismisses the ones they
-  # disagree with. `prApproveEnabled: false` in `.mergecraft/config.yaml`
-  # already rules out APPROVE.
+  # unblock a merge. The input shipped in 0.1.0a7, which MERGECRAFT_ACTION_SHA
+  # pins. `prApproveEnabled: false` in `.mergecraft/config.yaml` also rules out
+  # APPROVE.
   #
   # Publishes with the JOB token, never the reviewer App. The App identity is
   # what mergeCraft treats as "its own" reviews, so sharing it with the cascade
-  # would (a) trip the same-head skip (#1490: the cascade's review already
-  # sits on this head SHA, so the agent would never run), (b) let each reviewer
+  # would (a) trip the same-head skip (#1490: when the cascade's review on this
+  # head SHA requested changes, the agent would never run), (b) let each reviewer
   # auto-resolve the other's threads whenever it did not re-raise a finding,
   # and (c) overwrite the cascade's sticky progress comment. The shared
   # `github-actions[bot]` login is never an expected publisher

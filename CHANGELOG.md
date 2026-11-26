@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Re-running a review on a commit mergeCraft already reviewed no longer fails the
+  approval gate. The same-head skip reused any earlier review but reported a
+  neutral check, which every reference workflow gate reads as "requested
+  changes". It now skips only when the newest review on that commit requested
+  changes, and reports that as a failing check that links the review. A commit
+  whose newest review passed is reviewed again, as in 0.1.0a6 (#1490).
+- The comments on this repository's advisory Sonnet review job no longer say
+  the pinned Action ignores `review_event`.
 
 ## 0.1.0a7
 ### Breaking — action required
