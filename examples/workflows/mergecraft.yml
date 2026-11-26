@@ -50,7 +50,7 @@ jobs:
 
       - name: Run mergeCraft
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-        uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
         with:
           prompt: >
             ${{ github.event_name == 'pull_request'
@@ -70,7 +70,7 @@ jobs:
           # `uses:` line above, so it learns the pin only from here — omit it and
           # the run records an empty Action pin and cannot report a pin/image
           # mismatch. Keep it equal to the `uses:` ref.
-          MERGECRAFT_ACTION_SHA: 44bd67c55666303d5bd35efed5ef53868b27bb46
+          MERGECRAFT_ACTION_SHA: ca65b4c95c7afbbefa58033cea1b31b1197d0372
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -83,8 +83,8 @@ jobs:
       - name: Report merge queue approval
         if: github.event_name == 'merge_group'
         id: mergecraft_merge_group
-        uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
         with:
           status_checks: enabled
         env:
-          MERGECRAFT_ACTION_SHA: 44bd67c55666303d5bd35efed5ef53868b27bb46
+          MERGECRAFT_ACTION_SHA: ca65b4c95c7afbbefa58033cea1b31b1197d0372

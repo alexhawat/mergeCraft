@@ -47,7 +47,7 @@ and Claude Code for `anthropic`
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install mergecraft-action==0.1.0a6
+uv tool install mergecraft-action==0.1.0a7
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml, no secrets
 ```
 
@@ -84,7 +84,7 @@ mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MC
    `@mergecraft review` comments.
 
 Docs on `main` may describe unreleased behavior; the
-[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
+[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs) match
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+      - uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
 ```
 
 For ignore paths, comment triggers and hardened workflows, see the [workflow guide](docs/workflows.md).
@@ -252,12 +252,12 @@ Use this when asked to add AI PR review to another repository.
    CLI binary is still `mergecraft`:
 
    ```bash
-   uv tool install mergecraft-action==0.1.0a6
+   uv tool install mergecraft-action==0.1.0a7
    mergecraft --install-completion   # optional shell completion
    ```
 
    Docs on `main` may describe unreleased behavior. Use the
-   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs)
    for this install; do not assume newer CLI flags or fixes are included.
 
    To run an unreleased commit instead, pin the distribution to the repository:
@@ -3260,7 +3260,7 @@ PyPI carries the pre-release `mergecraft-action` (the CLI binary stays
 `mergecraft`):
 
 ```bash
-uv tool install mergecraft-action==0.1.0a6
+uv tool install mergecraft-action==0.1.0a7
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
@@ -3270,7 +3270,7 @@ interpreter paths where the console script is not on `PATH`.
 
 Docs on `main` may describe unreleased behavior, including CLI selection rules
 and review fixes that this alpha does not contain. Use the
-[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs)
 for the installed version.
 
 For intentional development testing, replace `<full-commit-sha>` below with
@@ -3535,7 +3535,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -3602,7 +3602,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -3682,7 +3682,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -3713,7 +3713,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
+- uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # v0.1.0a7
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]
