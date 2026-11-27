@@ -2,8 +2,6 @@
 
 Exports:
     DiffFile: One ``diff --git`` section and the paths it names.
-    DiffStatus: ``added``, ``deleted``, ``modified``, ``renamed`` or ``copied``.
-    ParsedDiff: The text before the first section plus every section.
     parse_diff: Parse a unified diff into a :class:`ParsedDiff`.
     changed_paths_in_diff: The post-image path of every section, in first-seen order.
     diff_lines: Split diff text on ``\\n`` only, as Git does.
@@ -16,8 +14,6 @@ from __future__ import annotations
 from mergecraft.diff.quoting import split_diff_git_paths, unquote_git_path
 from mergecraft.diff.sections import (
     DiffFile,
-    DiffStatus,
-    ParsedDiff,
     changed_paths_in_diff,
     diff_lines,
     parse_diff,
@@ -25,8 +21,6 @@ from mergecraft.diff.sections import (
 
 __all__ = [
     "DiffFile",
-    "DiffStatus",
-    "ParsedDiff",
     "changed_paths_in_diff",
     "diff_lines",
     "parse_diff",
