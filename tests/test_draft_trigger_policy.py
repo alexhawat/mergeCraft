@@ -12,7 +12,7 @@ import pytest
 
 from mergecraft.action import review_policy
 from mergecraft.config import RepoSettings
-from tests.support.run_main_harness import FakeGitHubClient, run_main_for_test
+from tests.support.run_main_harness import FakeGitHubClient, MainRunRecord, run_main_for_test
 
 
 def _event(*, action: str, draft: bool) -> dict[str, Any]:
@@ -194,40 +194,15 @@ async def test_native_review_reads_policy_at_base_sha(
         assert "Draft lite" in (record.result.result or "")
 
 
-@pytest.mark.parametrize(
-    ("frequency", "action", "prior_review", "runs_agent"),
-    [
-        pytest.param("everyPush", "synchronize", "approved", True, id="every-push"),
-        pytest.param("everyPush", "synchronize", "same-head", False, id="same-head-comment"),
-        pytest.param("oncePerPr", "synchronize", "approved", False, id="once-already-reviewed"),
-        pytest.param("oncePerPr", "synchronize", "none", True, id="once-no-reviewed-history"),
-        pytest.param(
-            "oncePerPr", "synchronize", "formal-changes", False, id="once-formal-changes-requested"
-        ),
-        pytest.param("oncePerPr", "ready_for_review", "approved", True, id="once-ready"),
-        pytest.param("oncePerPr", "synchronize", "commented", False, id="once-completed-comment"),
-        pytest.param(
-            "oncePerPr", "synchronize", "inconclusive", True, id="once-inconclusive-comment"
-        ),
-        pytest.param(
-            "oncePerPr", "synchronize", "request-changes", True, id="once-request-changes-comment"
-        ),
-        pytest.param("oncePerPr", "synchronize", "spoofed", True, id="once-spoofed-comment"),
-        pytest.param(
-            "oncePerPr", "synchronize", "injected-finding", True, id="once-injected-finding"
-        ),
-        pytest.param("onRequest", "ready_for_review", "none", False, id="request-only"),
-    ],
-)
-async def test_frequency_uses_verified_formal_review_history(
+async def _run_with_review_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    *,
     frequency: str,
     action: str,
     prior_review: str,
-    runs_agent: bool,
-) -> None:
+) -> tuple[MainRunRecord, list[int]]:
+    """Run the Action with one mergeCraft review in the pull request's history."""
     from mergecraft.evidence.packet import (
         PACKET_SCHEMA_VERSION,
         AgentMetadata,
@@ -238,7 +213,7 @@ async def test_frequency_uses_verified_formal_review_history(
     from mergecraft.findings.ledger import REVIEW_BODY_MARKER, render_deterministic_review_block
     from tests.support.publication import APP_DIFF
 
-    request = prior_review in {"request-changes", "formal-changes"}
+    request = prior_review in {"request-changes", "formal-changes", "same-head-changes"}
     outcome = (
         "failed"
         if request
@@ -294,11 +269,17 @@ async def test_frequency_uses_verified_formal_review_history(
         history_reads.append(pull_number)
         if prior_review == "none":
             return []
-        formal_states = {"approved": "APPROVED", "formal-changes": "CHANGES_REQUESTED"}
+        formal_states = {
+            "approved": "APPROVED",
+            "same-head-approved": "APPROVED",
+            "formal-changes": "CHANGES_REQUESTED",
+            "same-head-changes": "CHANGES_REQUESTED",
+        }
+        same_head = prior_review.startswith("same-head")
         return [
             {
                 "state": formal_states.get(prior_review, "COMMENTED"),
-                "commit_id": ("1" if prior_review == "same-head" else "3") * 40,
+                "commit_id": ("1" if same_head else "3") * 40,
                 "body": f"{body}\n{REVIEW_BODY_MARKER}\n*via mergecraft*",
                 "id": 567,
                 "html_url": "https://example.com/?token=review-url-canary",
@@ -323,33 +304,97 @@ async def test_frequency_uses_verified_formal_review_history(
         event_name="pull_request_target",
         event_payload=_event(action=action, draft=False),
         env={"GITHUB_ACTIONS": "true", "GITHUB_SERVER_URL": "https://github.example.com"},
-        capture_status_checks=prior_review == "same-head",
+        capture_status_checks=prior_review.startswith("same-head"),
+    )
+    return record, history_reads
+
+
+@pytest.mark.parametrize(
+    ("frequency", "action", "prior_review", "runs_agent"),
+    [
+        pytest.param("everyPush", "synchronize", "approved", True, id="every-push"),
+        pytest.param("oncePerPr", "synchronize", "approved", False, id="once-already-reviewed"),
+        pytest.param("oncePerPr", "synchronize", "none", True, id="once-no-reviewed-history"),
+        pytest.param(
+            "oncePerPr", "synchronize", "formal-changes", False, id="once-formal-changes-requested"
+        ),
+        pytest.param("oncePerPr", "ready_for_review", "approved", True, id="once-ready"),
+        pytest.param("oncePerPr", "synchronize", "commented", False, id="once-completed-comment"),
+        pytest.param(
+            "oncePerPr", "synchronize", "inconclusive", True, id="once-inconclusive-comment"
+        ),
+        pytest.param(
+            "oncePerPr", "synchronize", "request-changes", True, id="once-request-changes-comment"
+        ),
+        pytest.param("oncePerPr", "synchronize", "spoofed", True, id="once-spoofed-comment"),
+        pytest.param(
+            "oncePerPr", "synchronize", "injected-finding", True, id="once-injected-finding"
+        ),
+        pytest.param("onRequest", "ready_for_review", "none", False, id="request-only"),
+    ],
+)
+async def test_frequency_uses_verified_formal_review_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    frequency: str,
+    action: str,
+    prior_review: str,
+    runs_agent: bool,
+) -> None:
+    record, _ = await _run_with_review_history(
+        tmp_path, monkeypatch, frequency=frequency, action=action, prior_review=prior_review
     )
     assert bool(record.agent_runs) is runs_agent
-    if prior_review == "same-head":
-        assert history_reads == [7]
-        assert record.result is not None
-        assert record.result.evidence_packet_path is not None
-        packet_path = Path(record.result.evidence_packet_path)
-        packet_text = await asyncio.to_thread(packet_path.read_text, encoding="utf-8")
-        triage = json.loads(packet_text)["triage"]
-        assert triage["recognizer"] == "sameHeadSha"
-        assert triage["relied_on_checks"] == [
-            "https://github.example.com/acme/demo/pull/7#pullrequestreview-567"
-        ]
-        assert "review-url-canary" not in packet_text
-        assert (
-            next(
-                check["conclusion"]
-                for check in record.status_check_runs
-                if check["name"] == "mergecraft-approval"
-            )
-            == "neutral"
-        )
-        captured = capsys.readouterr()
-        assert "This head SHA already has a trusted review" in captured.out
-        assert "review-url-canary" not in captured.out
-        assert "review-url-canary" not in captured.err
+
+
+@pytest.mark.parametrize("prior_review", ["same-head", "same-head-approved"])
+async def test_a_pass_on_the_same_head_is_reviewed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prior_review: str
+) -> None:
+    """Reusing a pass would grant approval without the re-approval proof (#1490)."""
+    record, history_reads = await _run_with_review_history(
+        tmp_path,
+        monkeypatch,
+        frequency="everyPush",
+        action="synchronize",
+        prior_review=prior_review,
+    )
+    assert record.agent_runs
+    assert history_reads[:1] == [7]
+
+
+async def test_requested_changes_on_the_same_head_are_reused_as_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A re-run reports the standing request as a failing check, not a neutral one (#1490)."""
+    record, history_reads = await _run_with_review_history(
+        tmp_path,
+        monkeypatch,
+        frequency="everyPush",
+        action="synchronize",
+        prior_review="same-head-changes",
+    )
+    assert not record.agent_runs
+    assert history_reads == [7]
+    assert record.result is not None
+    assert record.result.evidence_packet_path is not None
+    packet_path = Path(record.result.evidence_packet_path)
+    packet_text = await asyncio.to_thread(packet_path.read_text, encoding="utf-8")
+    packet_json = json.loads(packet_text)
+    triage = packet_json["triage"]
+    assert triage["recognizer"] == "sameHeadSha"
+    assert packet_json["decision"]["verdict"] == "failure"
+    assert "changes requested on this head still stand" in packet_json["decision"]["reason"]
+    assert triage["relied_on_checks"] == [
+        "https://github.example.com/acme/demo/pull/7#pullrequestreview-567"
+    ]
+    assert "review-url-canary" not in packet_text
+    conclusions = {check["name"]: check["conclusion"] for check in record.status_check_runs}
+    assert conclusions["mergecraft-approval"] == "failure"
+    captured = capsys.readouterr()
+    assert "This head SHA already has a trusted review that requested changes" in captured.out
+    assert "review-url-canary" not in captured.out
+    assert "review-url-canary" not in captured.err
 
 
 @pytest.mark.parametrize(

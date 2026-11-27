@@ -492,6 +492,13 @@ review:
   still trigger a review if the workflow sends those events. Missing or
   unverifiable review history allows a review.
   `onRequest` suppresses automatic PR reviews, including ready events.
+- Whatever the frequency, a run on a head SHA whose newest verified mergeCraft
+  review requested changes does not review it again. It links that review and
+  reports a failing `mergecraft-approval` check, so a re-run cannot clear or hide
+  the request. A head whose newest review passed is reviewed again: carrying a
+  pass over needs the proof `review.fastPath.reapproval` checks
+  ([review checks](REVIEW-CHECKS.md)). Push a commit or use an
+  authorized manual dispatch to get a new review of a blocked head.
 
 The Action reads these settings from the base checkout for
 `pull_request_target` and the pinned base commit for `pull_request`. If it
