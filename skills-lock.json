@@ -43,6 +43,12 @@
       "skillPath": "skills/mergecraft/SKILL.md",
       "computedHash": "bca1b5107948c2614c8fc0dcd94c1e2ce4e6b2c909ee56ded8531b27bd0c6725"
     },
+    "merge-attention": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/merge-attention/SKILL.md",
+      "computedHash": "4ea0445ec0ea31bc3dfede46151571b77e6ae721e2cd3c8d967a0870fc39f8ea"
+    },
     "mergecraft-codex": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",

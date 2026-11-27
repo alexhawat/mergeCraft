@@ -58,6 +58,8 @@ def plan_pin_updates(root: Path, new_version: str) -> dict[Path, str]:
         text = path.read_text(encoding="utf-8")
         pins = INSTALL_PIN.findall(text)
         links = RELEASE_DOCS.findall(text)
+        if not pins and not links:
+            continue
         if not pins or set(pins) != {old_version} or not links or set(links) != {old_version}:
             raise ValueError(f"{path}: install pins and release-doc links must match {old_version}")
         updated = INSTALL_PIN.sub(f"mergecraft-action=={release}", text)

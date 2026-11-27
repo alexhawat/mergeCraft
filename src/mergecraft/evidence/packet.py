@@ -37,6 +37,7 @@ from mergecraft.analyzers.finding import Finding  # noqa: TC001 — Pydantic res
 from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 from mergecraft.evals.eval_metadata import EvalMetadata  # noqa: TC001 — Pydantic resolves model fields at runtime
 from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — Pydantic resolves model fields at runtime
+from mergecraft.merge_attention.types import MergeAttentionSection  # noqa: TC001
 
 # D7 — the packet is versioned from day one. Any field-level change (additive
 # or otherwise) that is not accompanied by a bump of this literal must fail
@@ -143,7 +144,9 @@ from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — P
 #   Additive; both default to ``None``. ``run_metrics`` also records what the
 #   verdict pre-flights did (#1516): ``coverage_preflight_refusals``,
 #   ``unread_added_lines_at_first_verdict`` and ``depth_preflight_refused``.
-PACKET_SCHEMA_VERSION = "1.22.0"
+# - 1.23.0 — #1609 adds optional ``merge_attention``: human-attention grade only;
+#   it never feeds ``decide_approval``. Additive; defaults to ``None``.
+PACKET_SCHEMA_VERSION = "1.23.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -500,6 +503,8 @@ class MergeEvidencePacket(BaseModel):
     run_metrics: RunMetrics | None = None
     # Opaque identity for detecting multiple stored copies of one invocation.
     run_id: str | None = None
+    # #1609 — merge-attention grade (human heuristic; never a gate input).
+    merge_attention: MergeAttentionSection | None = None
 
 
 __all__ = [

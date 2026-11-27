@@ -401,6 +401,9 @@ def render_deterministic_review_block(
     blast_radius_line = _blast_radius_record_line(getattr(packet, "blast_radius", None))
     if blast_radius_line is not None:
         header_lines.append(blast_radius_line)
+    from mergecraft.merge_attention.render import merge_attention_record_lines
+
+    header_lines.extend(merge_attention_record_lines(getattr(packet, "merge_attention", None)))
     coverage = getattr(packet, "coverage", None)
     if coverage is not None:
         from mergecraft.evidence.coverage import coverage_summary_line

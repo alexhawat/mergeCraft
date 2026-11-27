@@ -52,6 +52,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [language-coverage](language-coverage.md) | contributor | Language coverage matrix, sourced public pull requests per language, and the prioritized fixture work list (research, not a corpus). |
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
+| [merge-attention](merge-attention.md) | consumer | Merge-attention grade rubric, proof locations, and config keys — human heuristic only, never a merge gate. |
 | [opencode](opencode.md) | consumer | OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup. |
 | [policy-evidence](policy-evidence.md) | consumer | Where each policy evidence key comes from, why a pull request cannot forge it, and the policy.evidence config. |
 | [railway-sandbox-evaluation](railway-sandbox-evaluation.md) | contributor | Evaluation kit for Railway sandboxes as ephemeral review and test runners — spike script, measurement template, go/no-go criteria. |
