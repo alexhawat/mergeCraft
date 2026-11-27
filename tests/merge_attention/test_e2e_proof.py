@@ -37,3 +37,27 @@ def test_perf_path_requires_bench_proof() -> None:
     gaps = verification_gaps_for_user_facing(change, proof)
     assert gaps
     assert "profil" in gaps[0].lower()
+
+
+def test_dotgithub_path_not_corrupted_by_path_normalization() -> None:
+    """Regression: lstrip('./') mangles paths like `.github/workflows/x.yml`."""
+    change = detect_user_facing_changes([".github/workflows/ci.yml"])
+    assert not change.any_ui
+    assert change.ui_paths == ()
+
+
+def test_prefixed_relative_path_matches_ui_glob() -> None:
+    change = detect_user_facing_changes(["./src/components/Widget.tsx"])
+    assert change.any_ui
+    assert "src/components/Widget.tsx" in change.ui_paths
+
+
+def test_custom_perf_glob_merges_with_defaults() -> None:
+    change = detect_user_facing_changes(
+        ["src/perf/hot_loop.py", "custom/metrics.py"],
+        perf_globs=("custom/**",),
+    )
+    assert change.any_perf
+    assert "src/perf/hot_loop.py" in change.perf_paths
+    assert "custom/metrics.py" in change.perf_paths
+    assert detect_user_facing_changes(["src/perf/hot_loop.py"], perf_globs=()).any_perf

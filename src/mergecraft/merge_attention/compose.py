@@ -298,11 +298,16 @@ def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
     payload = getattr(ctx, "payload", None)
     if payload is not None:
         event = getattr(payload, "event", None)
-        pull = getattr(event, "pull_request", None) if event is not None else None
-        if isinstance(pull, dict):
-            body = pull.get("body")
-            if isinstance(body, str):
-                pr_body = body
+        if event is not None:
+            pull = getattr(event, "pull_request", None)
+            if isinstance(pull, dict):
+                body = pull.get("body")
+                if isinstance(body, str):
+                    pr_body = body
+            if pr_body is None:
+                body = getattr(event, "body", None)
+                if isinstance(body, str) and body.strip():
+                    pr_body = body
     summary = None
     if state.terminal_submission is not None:
         summary = str(getattr(state.terminal_submission, "summary", "") or "") or None

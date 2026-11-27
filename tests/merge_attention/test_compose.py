@@ -7,10 +7,20 @@ from typing import Any
 from mergecraft.agents.gates import decide_approval
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.classify.blast_radius import BlastRadiusClassification, LaneReason
+from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
-from mergecraft.merge_attention.compose import MergeAttentionInputs, compose_merge_attention
+from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.merge_attention.compose import (
+    MergeAttentionInputs,
+    attach_merge_attention_to_packet,
+    compose_merge_attention,
+    inputs_from_context,
+)
 from mergecraft.merge_attention.types import MergeAttentionSection
+from mergecraft.modes import compute_modes
 from mergecraft.policy.evidence_producers import EvidenceRecord, PolicyEvidence
+from mergecraft.utils.github import GitHubClient
 
 
 def _packet(**overrides: Any) -> MergeEvidencePacket:
@@ -77,6 +87,58 @@ def test_verification_gap_for_ui_without_proof() -> None:
     verification = next(row for row in section.axes if row.axis == "verification")
     assert verification.verification_gaps
     assert verification.level in {"medium", "high"}
+
+
+def test_inputs_from_context_collects_pr_body_and_summary(tmp_path) -> None:
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.terminal_submission = type("S", (), {"summary": "Shipped with screenshot."})()
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(
+            event=PayloadEvent(
+                trigger="pull_request",
+                is_pr=True,
+                body="![proof](https://user-images.githubusercontent.com/1/a.png)",
+            ),
+        ),
+        github=GitHubClient(token="test-token"),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+        trust_tier="trusted",
+    )
+    inputs = inputs_from_context(ctx)
+    assert inputs.pr_body
+    assert "proof" in inputs.pr_body
+    assert inputs.review_summary == "Shipped with screenshot."
+
+
+def test_attach_merge_attention_to_packet_when_enabled(tmp_path) -> None:
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="unknown")),
+        github=GitHubClient(token="test-token"),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+        repo_settings_snapshot=snapshot,
+        trust_tier="trusted",
+    )
+    packet = _packet()
+    attached = attach_merge_attention_to_packet(packet, ctx)
+    assert attached.merge_attention is not None
+    assert attached.merge_attention.overall in {"low", "medium", "high"}
 
 
 def test_merge_attention_on_packet_does_not_change_decide_approval() -> None:

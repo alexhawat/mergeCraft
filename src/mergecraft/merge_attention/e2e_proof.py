@@ -88,10 +88,23 @@ def default_perf_globs() -> tuple[str, ...]:
     return _DEFAULT_PERF_GLOBS
 
 
+def _normalize_repo_path(path: str) -> str:
+    """Normalize a repo-relative path for glob matching."""
+    normalized = path.replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized.removeprefix("./")
+    return normalized
+
+
+def _merged_perf_globs(perf_globs: Sequence[str] | None) -> tuple[str, ...]:
+    extras = tuple(perf_globs or ())
+    return tuple(dict.fromkeys([*default_perf_globs(), *extras]))
+
+
 def _match_paths(paths: Sequence[str], globs: Sequence[str]) -> tuple[str, ...]:
     matched: list[str] = []
     for path in paths:
-        normalized = path.replace("\\", "/").lstrip("./")
+        normalized = _normalize_repo_path(path)
         if any(fnmatch(normalized, pattern) for pattern in globs):
             matched.append(normalized)
     return tuple(dict.fromkeys(matched))
@@ -104,8 +117,8 @@ def detect_user_facing_changes(
     perf_globs: Sequence[str] | None = None,
 ) -> UserFacingChange:
     """Classify changed paths against configured globs."""
-    perf = perf_globs or default_perf_globs()
-    normalized = [p.replace("\\", "/").lstrip("./") for p in changed_paths]
+    perf = _merged_perf_globs(perf_globs)
+    normalized = [_normalize_repo_path(p) for p in changed_paths]
     extra = list(user_facing_globs or ())
     ui_globs = _DEFAULT_UI_GLOBS + tuple(g for g in extra if g not in _DEFAULT_UI_GLOBS)
     return UserFacingChange(
