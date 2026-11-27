@@ -109,7 +109,10 @@ ARG ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c
 # CVE-2026-84782; both are pinned so the image cannot drift back. apt 2.6.1 is
 # vulnerable to CVE-2026-109518 (DLA-4880-1, HIGH: an on-path mirror can make a
 # retried download install an unverified package); bookworm-security ships
-# 2.6.2, pinned the same way.
+# 2.6.2, pinned the same way. The base also ships libpam* 1.5.2-6+deb12u2,
+# vulnerable to CVE-2025-6020 (HIGH: pam_namespace path traversal to local
+# root); 1.5.2-6+deb12u3 fixes it, and all four PAM packages are pinned
+# together so their exact-version dependencies resolve.
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         apt=2.6.2 \
@@ -120,6 +123,10 @@ RUN apt-get update -qq \
         iptables \
         jq \
         libapt-pkg6.0=2.6.2 \
+        libpam-modules=1.5.2-6+deb12u3 \
+        libpam-modules-bin=1.5.2-6+deb12u3 \
+        libpam-runtime=1.5.2-6+deb12u3 \
+        libpam0g=1.5.2-6+deb12u3 \
         libpcre2-8-0=10.42-1+deb12u2 \
         libssl3=3.0.22-1~deb12u2 \
         openssh-client \
