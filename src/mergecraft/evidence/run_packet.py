@@ -991,7 +991,7 @@ def build_run_packet(
         analyzers=analyzers_evidence,
         run_metrics=run_metrics,
     )
-    return _finalize_packet_with_gate(
+    finalized = _finalize_packet_with_gate(
         packet,
         ctx=ctx,
         run_succeeded=run_succeeded and not orphaned_hits and not invalid_diff,
@@ -999,6 +999,9 @@ def build_run_packet(
             "diff paths could not be parsed" if invalid_diff else _open_ledger_reason(orphaned_hits)
         ),
     )
+    from mergecraft.merge_attention.compose import attach_merge_attention_to_packet
+
+    return attach_merge_attention_to_packet(finalized, ctx)
 
 
 def _triage_section(state: ToolState) -> TriageSection | None:

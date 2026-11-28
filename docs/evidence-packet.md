@@ -94,7 +94,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.22.0`.
+The current version is `1.23.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -180,6 +180,9 @@ not move.
   `coverage_preflight_refusals`, `unread_added_lines_at_first_verdict` and
   `depth_preflight_refused` (#1516), which record what the verdict pre-flights
   did. Additive; measurement only.
+- `1.23.0` — adds optional `merge_attention` (#1609): categorical low/medium/high
+  human-attention grade per axis. Additive; defaults to `null`. Never an input to
+  `decide_approval`.
 
 ## Top-level fields
 

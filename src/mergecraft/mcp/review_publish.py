@@ -1269,6 +1269,24 @@ async def publish_github_review(
     if demoted_bodies:
         ctx.tool_state.review_inline_comments_demoted = True
         agent_body = append_demoted_inline_comments(agent_body, demoted_bodies)
+    if packet is not None and review_settings.merge_attention.display_in_summary:
+        from mergecraft.merge_attention.compose import merge_attention_section_for_run
+        from mergecraft.merge_attention.render import merge_attention_summary_block
+
+        section = getattr(packet, "merge_attention", None)
+        if section is None and review_settings.merge_attention.enabled:
+            section = merge_attention_section_for_run(
+                packet,
+                ctx,
+                settings=review_settings.merge_attention,
+            )
+        attention_block = merge_attention_summary_block(section)
+        if attention_block:
+            agent_body = (
+                f"{agent_body.rstrip()}\n\n{attention_block}"
+                if agent_body.strip()
+                else attention_block
+            )
     from mergecraft.findings.ledger import (
         hydrate_finding_ledger_from_progress_comment,
         merge_ledger_into_comment,

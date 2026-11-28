@@ -115,6 +115,12 @@ pages:
     generator: null
     purpose: Blast-radius lane semantics in the merge evidence packet.
 
+  - path: docs/merge-attention.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Merge-attention grade rubric, proof locations, and config keys — human heuristic only, never a merge gate.
+
   - path: docs/red-green-receipts.md
     audience: consumer
     template: consumer

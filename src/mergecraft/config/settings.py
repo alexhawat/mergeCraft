@@ -589,6 +589,44 @@ class ReviewBudgetSettings(BaseModel):
     window_size: int = Field(default=20, alias="windowSize", ge=1)
 
 
+class MergeAttentionSettings(_OptionalFeatureModel):
+    """Merge-attention grade display (#1609). Never affects gating."""
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Compute and show the merge-attention grade on the review summary and run "
+            "record. Does not change approval, checks, or exit codes."
+        ),
+    )
+    include_in_packet: bool = Field(
+        default=True,
+        alias="includeInPacket",
+        description="Persist the grade on the merge evidence packet.",
+    )
+    display_in_summary: bool = Field(
+        default=True,
+        alias="displayInSummary",
+        description="Append the grade block to the published review summary.",
+    )
+    user_facing_globs: list[str] = Field(
+        default_factory=list,
+        alias="userFacingGlobs",
+        description=(
+            "Extra path globs treated as user-facing for end-to-end proof (#1611). "
+            "Merged with built-in defaults for UI, CLI, and public API paths."
+        ),
+    )
+    perf_sensitive_globs: list[str] = Field(
+        default_factory=list,
+        alias="perfSensitiveGlobs",
+        description=(
+            "Extra globs for performance-sensitive changes requiring benchmark or "
+            "profiling proof. Merged with built-in perf defaults."
+        ),
+    )
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -700,6 +738,10 @@ class ReviewSettings(BaseModel):
         ),
     )
     budget: ReviewBudgetSettings = Field(default_factory=ReviewBudgetSettings)
+    merge_attention: MergeAttentionSettings = Field(
+        default_factory=MergeAttentionSettings,
+        alias="mergeAttention",
+    )
 
 
 # Evidence keys a repository may declare a proof for under ``policy.evidence``.
