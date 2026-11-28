@@ -52,6 +52,14 @@ def test_prefixed_relative_path_matches_ui_glob() -> None:
     assert "src/components/Widget.tsx" in change.ui_paths
 
 
+def test_run_evidence_file_closes_ui_gap() -> None:
+    change = detect_user_facing_changes(["src/components/Widget.tsx"])
+    proof = scan_e2e_proof(run_artifact_paths=("attachments/after.png",))
+    assert proof.has_visual_proof
+    assert "run_artifacts" in proof.sources_searched
+    assert not verification_gaps_for_user_facing(change, proof)
+
+
 def test_custom_perf_glob_merges_with_defaults() -> None:
     change = detect_user_facing_changes(
         ["src/perf/hot_loop.py", "custom/metrics.py"],

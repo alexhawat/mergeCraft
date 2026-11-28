@@ -133,15 +133,13 @@ def scan_e2e_proof(
     *,
     pr_body: str | None = None,
     review_summary: str | None = None,
-    artifact_names: Sequence[str] | None = None,
     run_artifact_paths: Sequence[str] | None = None,
 ) -> ProofScan:
-    """Scan PR body, review summary, CI artifact names, and run artifacts for proof.
+    """Scan PR body, review summary, and run evidence files for proof.
 
     Documented proof locations (``docs/merge-attention.md``):
     - Pull request description and review summary (markdown images, attachments, bench notes)
-    - Workflow artifact basenames listed in ``ci_evidence`` ingest
-    - Files under the run evidence directory whose names end in image/video extensions
+    - Files under the run evidence directory (see ``resolve_evidence_dir``)
     """
     chunks: list[str] = []
     sources: list[str] = []
@@ -151,11 +149,6 @@ def scan_e2e_proof(
     if review_summary and review_summary.strip():
         chunks.append(review_summary)
         sources.append("review_summary")
-    for name in artifact_names or ():
-        if name.strip():
-            chunks.append(name)
-    if artifact_names:
-        sources.append("ci_artifacts")
     artifact_paths = list(run_artifact_paths or ())
     for path in artifact_paths:
         if path.strip():

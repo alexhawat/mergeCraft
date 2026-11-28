@@ -7,7 +7,7 @@ Surface a compact **low / medium / high** merge-attention grade on each review: 
 ## Design
 
 1. **Compose after gating** — `compose_merge_attention` runs only after `decide_approval` / `_finalize_packet_with_gate`. The grade is attached with `model_copy` and is not an input to `decide_approval`, `select_rule_id`, or status checks.
-2. **Deterministic first** — Each axis is scored from run evidence: blast-radius lane, policy evidence (`rollback_plan`, `health_check`), analyzer/CI/static-check signals, blocking findings, scope/fix proof codes, verifier fingerprints, and end-to-end proof detection (#1611).
+2. **Deterministic first** — Each axis is scored from run evidence: blast-radius lane, policy evidence (`rollback_plan`, `health_check`), analyzer/CI/static-check signals, blocking findings, scope/fix proof codes, verifier fingerprints, and end-to-end proof from the PR body, review summary, and run evidence directory (#1611).
 3. **Model-labelled gaps** — When alignment cannot be resolved from evidence, the axis verdict cites the agent terminal verdict / self-assessment and marks `source: model`.
 4. **No numeric confidence** — Per REVIEW-DOCTRINE C12/C22, axis verdicts are categorical only; any internal weighting stays in code and is not published on findings or inline comments.
 5. **Display** — `review.mergeAttention.enabled` (default on) controls packet population and rendering. When off, behaviour matches pre-feature runs.

@@ -57,7 +57,7 @@ For a single-file doc change with low blast radius and no blockers:
 | Error detection | `low` | Error-detection posture follows blast-radius; no health-check evidence required. |
 ```
 
-For a UI change without screenshots in the PR body, expect **verification** `medium` or `high` with an explicit verification-gap sentence.
+For a UI change without screenshots in the PR body or run evidence directory, expect **verification** `medium` or `high` with an explicit verification-gap sentence.
 
 ## Thresholds
 

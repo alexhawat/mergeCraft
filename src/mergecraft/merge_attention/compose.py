@@ -36,7 +36,6 @@ class MergeAttentionInputs:
     static_checks: Sequence[dict[str, Any]] | None = None
     pr_body: str | None = None
     review_summary: str | None = None
-    artifact_names: Sequence[str] | None = None
     run_artifact_paths: Sequence[str] | None = None
     verified_fingerprint_count: int = 0
     analyzer_ran: bool = False
@@ -184,7 +183,6 @@ def _axis_verification(
         scan_e2e_proof(
             pr_body=inputs.pr_body,
             review_summary=inputs.review_summary,
-            artifact_names=inputs.artifact_names,
             run_artifact_paths=inputs.run_artifact_paths,
         ),
     )
@@ -280,28 +278,24 @@ def compose_merge_attention(
     return MergeAttentionSection(overall=overall, axes=axes)
 
 
-def _artifact_names_from_base_branch_runs(
-    rows: Sequence[dict[str, Any]],
-) -> tuple[str, ...]:
-    """Basenames for e2e proof from base-branch CI attribution rows (#891).
+def merge_attention_section_for_run(
+    packet: MergeEvidencePacket,
+    ctx: ToolContext,
+    settings: MergeAttentionSettings | None = None,
+) -> MergeAttentionSection | None:
+    """Compose the grade when enabled for packet and/or summary output."""
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
 
-    Reads ``ci_evidence.base_branch_runs`` only; PR-head workflow artifacts are
-    intentionally out of scope for merge-attention proof ingest.
-    """
-    names: list[str] = []
-    for row in rows:
-        artifact = row.get("artifact")
-        if isinstance(artifact, str) and artifact.strip():
-            names.append(artifact.strip())
-        name = row.get("name")
-        if isinstance(name, str) and name.strip():
-            names.append(name.strip())
-        listed = row.get("artifacts")
-        if isinstance(listed, list):
-            for item in listed:
-                if isinstance(item, str) and item.strip():
-                    names.append(item.strip())
-    return tuple(dict.fromkeys(names))
+    resolved = settings or repo_settings_from_context(ctx).review.merge_attention
+    if not resolved.enabled:
+        return None
+    if not resolved.include_in_packet and not resolved.display_in_summary:
+        return None
+    return compose_merge_attention(
+        packet,
+        inputs=inputs_from_context(ctx),
+        settings=resolved,
+    )
 
 
 def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
@@ -335,17 +329,12 @@ def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
     summary = None
     if state.terminal_submission is not None:
         summary = str(getattr(state.terminal_submission, "summary", "") or "") or None
-    artifact_names: list[str] = []
-    if state.ci_evidence is not None:
-        artifact_names.extend(
-            _artifact_names_from_base_branch_runs(state.ci_evidence.base_branch_runs)
-        )
     run_artifacts: list[str] = []
-    evidence_dir = getattr(ctx, "tmpdir", None) or getattr(state, "evidence_dir", None)
-    if evidence_dir is not None:
-        from pathlib import Path
+    tmpdir = getattr(ctx, "tmpdir", None)
+    if tmpdir:
+        from mergecraft.evidence.run_packet import resolve_evidence_dir
 
-        root = Path(str(evidence_dir))
+        root = resolve_evidence_dir(tmpdir=str(tmpdir))
         if root.is_dir():
             for path in root.rglob("*"):
                 if path.is_file():
@@ -356,7 +345,6 @@ def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
         static_checks=list(state.static_checks),
         pr_body=pr_body,
         review_summary=summary,
-        artifact_names=artifact_names,
         run_artifact_paths=run_artifacts,
         verified_fingerprint_count=len(state.verified_ids),
         analyzer_ran=bool(analyzer and analyzer.ran),
@@ -372,15 +360,9 @@ def attach_merge_attention_to_packet(
     from mergecraft.config.settings_snapshot import repo_settings_from_context
 
     settings = repo_settings_from_context(ctx).review.merge_attention
-    if not settings.enabled:
+    section = merge_attention_section_for_run(packet, ctx, settings=settings)
+    if section is None or not settings.include_in_packet:
         return packet
-    if not settings.include_in_packet:
-        return packet
-    section = compose_merge_attention(
-        packet,
-        inputs=inputs_from_context(ctx),
-        settings=settings,
-    )
     return packet.model_copy(update={"merge_attention": section})
 
 
@@ -389,4 +371,5 @@ __all__ = [
     "attach_merge_attention_to_packet",
     "compose_merge_attention",
     "inputs_from_context",
+    "merge_attention_section_for_run",
 ]

@@ -28,8 +28,7 @@ Proof is detected in:
 
 - Pull request description
 - Published review summary (including attachments linked in markdown)
-- CI artifact basenames ingested into `ci_evidence`
-- Files under the run evidence directory (images, recordings, bench outputs)
+- Files under the run evidence directory (`resolve_evidence_dir` — images, recordings, bench outputs)
 
 Missing proof for a user-facing or perf-sensitive change is a **verification gap** on the verification axis (not a nit).
 
