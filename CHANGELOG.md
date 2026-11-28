@@ -520,6 +520,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in oxlint landmines plugin for agent test-honesty linting by @alexhawat and @claude in [#1554](https://github.com/alexhawat/mergeCraft/pull/1554)
 - Name changed paths in checkout integrity failures by @alexhawat in [#1491](https://github.com/alexhawat/mergeCraft/pull/1491)
 
+### Internal
+
+- Dependabot pull requests no longer wait for a human code-owner review.
+  `.github/workflows/dependabot-approve.yml` runs
+  `scripts/approve_dependabot_prs.py` hourly and approves them with a
+  code-owner user account's token, which an App review can never replace. It
+  approves only a pull request whose net diff is exactly Dependabot's own signed
+  commit: a maintainer's "Update branch" merge is fine, any other commit is not.
+  It skips a pull request a reviewer has requested changes on. Required checks
+  and the human merge are unchanged. The token is an environment secret limited
+  to `main`; operator setup is in `.github/CONTRIBUTING.md`.
+
 ## 0.1.0a6
 ### Breaking — action required
 

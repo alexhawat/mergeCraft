@@ -3,6 +3,12 @@
 # @sevn-one is a second code owner (a user account). GitHub Apps cannot be named
 # in CODEOWNERS, so an App review cannot satisfy code-owner review.
 #
+# Dependabot pull requests are the one exception to a human review:
+# .github/workflows/dependabot-approve.yml approves them with a code-owner
+# user account's token, and only when a PR's net diff is exactly Dependabot's
+# own signed commit. See .github/CONTRIBUTING.md, "Dependabot code-owner
+# approval".
+#
 # Both owners MUST stay on one line: CODEOWNERS resolves each file to only
 # its LAST matching pattern, so two separate `*` lines (as briefly landed
 # directly on main in 9ddd546) silently drop every owner but the last one —

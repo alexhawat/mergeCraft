@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: MIT
+# Code-owner approval for Dependabot pull requests.
+#
+# The `protect-main` ruleset requires a code-owner approval on every pull
+# request to `main`. Neither rulesets nor CODEOWNERS can condition on the pull
+# request's author, and an App review (`github-actions[bot]`, the mergeCraft
+# App) never counts as a code-owner approval (.github/CODEOWNERS). So this
+# workflow supplies that approval for Dependabot pull requests, using the token
+# of a code-owner *user* account, and only for a pull request whose net diff is
+# exactly Dependabot's own verified commit. `scripts/approve_dependabot_prs.py`
+# has the full rule. Unchanged: the required checks (`require-ci-on-main`),
+# conversation resolution, and a person pressing merge. A reviewer who requests
+# changes holds a pull request back.
+#
+# Safety:
+# - Triggers are `schedule` and `workflow_dispatch` only, so the definition
+#   that runs is always the default branch's. Never add `pull_request` or
+#   `pull_request_target`: `pull_request` runs a PR branch's own copy of this
+#   file, and Dependabot-triggered runs get no secrets anyway.
+# - The token is an *environment* secret of `dependabot-approval`, whose
+#   deployment-branch policy admits `main` only. A workflow on any other ref,
+#   including one a pull request adds, cannot read it.
+# - No pull-request content is checked out or executed. The job checks out the
+#   default branch (only the script, sparsely) and reads pull requests through
+#   the REST API.
+# - Without the secret the job logs a notice and succeeds.
+#
+# `dismiss_stale_reviews_on_push` drops the approval on every push (Dependabot
+# rebases, "Update branch"); the next hourly run approves the new head.
+# Operator setup: .github/CONTRIBUTING.md, "Dependabot code-owner approval".
+name: Dependabot approve
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Only this pull request number (blank: every open Dependabot PR)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Log the decisions without approving anything"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-approve
+  cancel-in-progress: false
+
+jobs:
+  candidates:
+    name: Look for Dependabot pull requests to approve
+    # Secret-free look-ahead on the schedule, so the token-holding job (which
+    # also records a deployment to its environment) only starts when an open
+    # Dependabot pull request is still waiting for an approval.
+    if: github.repository == 'alexhawat/mergeCraft' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # list open pull requests and their review decision
+    outputs:
+      pending: ${{ steps.count.outputs.pending }}
+    steps:
+      - name: Count Dependabot pull requests waiting for approval
+        id: count
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pending="$(gh pr list --author 'app/dependabot' --state open --limit 100 \
+            --json isDraft,reviewDecision \
+            --jq '[.[] | select((.isDraft | not) and .reviewDecision != "APPROVED" and .reviewDecision != "CHANGES_REQUESTED")] | length')"
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          echo "Dependabot pull requests waiting for approval: $pending"
+
+  approve:
+    name: Approve eligible Dependabot pull requests
+    needs: candidates
+    # `always()` so a dispatch (which skips `candidates`) still runs. A failed
+    # look-ahead leaves `pending` empty, which runs the sweep rather than
+    # silently skipping it.
+    if: >-
+      always() && github.repository == 'alexhawat/mergeCraft' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || needs.candidates.outputs.pending != '0')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dependabot-approval
+    permissions:
+      contents: read # check out the script; the approval uses the environment's token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/approve_dependabot_prs.py
+          sparse-checkout-cone-mode: false
+
+      - name: Approve eligible Dependabot pull requests
+        env:
+          DEPENDABOT_APPROVER_TOKEN: ${{ secrets.DEPENDABOT_APPROVER_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -o pipefail
+          args=(--repository "$GITHUB_REPOSITORY")
+          if [ -n "$PR_NUMBER" ]; then args+=(--pr "$PR_NUMBER"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          status=0
+          python3 scripts/approve_dependabot_prs.py "${args[@]}" > approve.log 2>&1 || status=$?
+          cat approve.log
+          {
+            echo "### Dependabot approve"
+            echo
+            echo '```'
+            cat approve.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

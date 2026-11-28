@@ -279,6 +279,49 @@ changed.
 `make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
 the permissions mismatch at authoring time.
 
+### Dependabot code-owner approval
+
+`protect-main` requires a code-owner approval on every pull request. Neither
+rulesets nor CODEOWNERS can exempt a particular author, and an App review never
+counts as a code-owner approval (`.github/CODEOWNERS`).
+`.github/workflows/dependabot-approve.yml` therefore approves Dependabot pull
+requests with a code-owner user account's token, hourly and on demand, so they
+no longer wait on a human code owner.
+
+It approves only a pull request whose net diff is exactly Dependabot's own signed
+commit. A maintainer's "Update branch" merge is fine; any other commit is not.
+`scripts/approve_dependabot_prs.py` lists every condition.
+
+Required checks, conversation resolution and the human merge are unchanged. To
+hold a pull request back (a major whose changelog needs reading, say), request
+changes. Every push dismisses the approval (`dismiss_stale_reviews_on_push`),
+and the next run approves the new head.
+
+Merging the workflow configures nothing. One-time operator setup:
+
+1. As a code-owner user account (one named in `.github/CODEOWNERS`), create a
+   token that can submit reviews on this repository. Prefer a fine-grained token
+   limited to this repository, with **Pull requests: read and write** and
+   **Contents: read**. A fine-grained token only reaches repositories owned by
+   its resource owner. If the account is a collaborator and cannot select this
+   repository, use a classic token with only the `public_repo` scope.
+2. In **Settings → Environments**, create the environment `dependabot-approval`.
+   Under **Deployment branches and tags**, choose **Selected branches and tags**
+   and add `main` only. Add the token as the environment secret
+   `DEPENDABOT_APPROVER_TOKEN`. Do not make it a repository secret: a
+   repository secret reaches every workflow on every branch, including one a
+   pull request adds.
+3. In **Actions → Dependabot approve → Run workflow**, run it on `main` with
+   **dry_run** checked. The log lists each open Dependabot pull request as
+   "would approve" or "skipped" with the reason. After that, the schedule takes
+   over.
+
+The approving account must not push to Dependabot branches.
+`require_last_push_approval` ignores an approval from whoever pushed last, so
+the sweep skips a pull request whose head commit that account authored. Without
+the secret the workflow only logs a notice. An expired or revoked token fails
+the run, with exit code 2.
+
 ## CLI startup
 
 The installed `mergecraft --version` and `mergecraft -v` forms report the

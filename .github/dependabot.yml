@@ -23,6 +23,12 @@ version: 2
 # comment in .github/workflows/mergecraft.yml. `changelog-preview` is
 # deliberately NOT exempted: it already passes on bot PRs, and skipping a
 # reusable-workflow caller changes the reported check name.
+#
+# Dependabot PRs also do not wait for a human code-owner review:
+# .github/workflows/dependabot-approve.yml approves them as a code owner when a
+# PR carries nothing but Dependabot's own signed commit. Required checks still
+# gate them, and a person still merges them. Request changes to hold one back,
+# for example a major whose changelog needs reading.
 updates:
   # `uv`, not `pip`: the `pip` updater rewrites `pyproject.toml` and never
   # touches `uv.lock`, so every Python bump failed `make lockcheck` (#966).
