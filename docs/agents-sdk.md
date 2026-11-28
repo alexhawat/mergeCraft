@@ -160,15 +160,15 @@ Upload the file as the workflow artifact ``mergecraft-agents-sdk-review``
 ``build_review_report`` applies ``filter_guarded_findings`` first, so the
 document carries the guarded findings and, in ``dropped``, why any were removed.
 A review that could not run is a document too:
-``AgentsSdkReviewReport(status="error", reason=..., head_sha=head)`` or
-``status="skipped"``. ``report.passed()`` is false for an error or any Critical
+``AgentsSdkReviewReport(schema_id=AGENTS_SDK_REVIEW_SCHEMA, status="error",
+reason=..., head_sha=head)`` or ``status="skipped"``. ``report.passed()`` is false for an error or any Critical
 or Major finding.
 
 The document (schema ``mergecraft.agents-sdk-review.v1``):
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | Always `mergecraft.agents-sdk-review.v1`. |
+| `schema` | string | Required; always `mergecraft.agents-sdk-review.v1`. A document without it is rejected. |
 | `status` | `reviewed`, `skipped` or `error` | Whether a review completed. |
 | `reason` | string or null | Why it was skipped or failed. |
 | `pull_request` | integer or null | The pull request number. |

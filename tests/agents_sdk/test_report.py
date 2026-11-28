@@ -7,8 +7,6 @@ import json
 import pytest
 from pydantic import ValidationError
 
-pytest.importorskip("agents")
-
 from mergecraft.agents_sdk.report import (
     AGENTS_SDK_REVIEW_SCHEMA,
     AgentsSdkReviewReport,
@@ -70,16 +68,27 @@ def test_report_round_trips_through_json_with_its_schema_key() -> None:
     assert AgentsSdkReviewReport.model_validate(document) == report
 
 
+def test_report_rejects_a_document_without_its_schema_marker() -> None:
+    with pytest.raises(ValidationError):
+        AgentsSdkReviewReport.model_validate({"status": "reviewed", "findings": []})
+
+
 def test_report_rejects_another_schema_and_unknown_keys() -> None:
     with pytest.raises(ValidationError):
         AgentsSdkReviewReport.model_validate({"schema": "other.v9", "status": "reviewed"})
     with pytest.raises(ValidationError):
-        AgentsSdkReviewReport.model_validate({"status": "reviewed", "verdict": "approve"})
+        AgentsSdkReviewReport.model_validate(
+            {"schema": AGENTS_SDK_REVIEW_SCHEMA, "status": "reviewed", "verdict": "approve"}
+        )
 
 
 def test_skipped_and_failed_reviews_have_no_findings_and_say_why() -> None:
-    skipped = AgentsSdkReviewReport(status="skipped", reason="no reviewable files changed")
-    failed = AgentsSdkReviewReport(status="error", reason="RateLimitError: slow down")
+    skipped = AgentsSdkReviewReport(
+        schema_id=AGENTS_SDK_REVIEW_SCHEMA, status="skipped", reason="no reviewable files changed"
+    )
+    failed = AgentsSdkReviewReport(
+        schema_id=AGENTS_SDK_REVIEW_SCHEMA, status="error", reason="RateLimitError: slow down"
+    )
     assert skipped.passed()
     assert not failed.passed()
     body = render_review_markdown(failed)
@@ -120,6 +129,7 @@ def test_markdown_lists_every_finding_by_severity_with_fix_scope_and_usage() -> 
 )
 def test_untrusted_text_cannot_forge_markdown_html_or_mentions(forged: str) -> None:
     report = AgentsSdkReviewReport(
+        schema_id=AGENTS_SDK_REVIEW_SCHEMA,
         status="reviewed",
         summary=forged,
         findings=[
@@ -137,6 +147,10 @@ def test_untrusted_text_cannot_forge_markdown_html_or_mentions(forged: str) -> N
 
 def test_markdown_is_capped() -> None:
     finding = ReviewFinding(severity="Minor", file="a.py", message="x" * 5000)
-    body = render_review_markdown(AgentsSdkReviewReport(status="reviewed", findings=[finding] * 50))
+    body = render_review_markdown(
+        AgentsSdkReviewReport(
+            schema_id=AGENTS_SDK_REVIEW_SCHEMA, status="reviewed", findings=[finding] * 50
+        )
+    )
     assert len(body) <= 60_000
     assert body.endswith("Review truncated.")

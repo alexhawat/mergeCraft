@@ -51,9 +51,9 @@ class AgentsSdkReviewReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_id: Literal["mergecraft.agents-sdk-review.v1"] = Field(
-        default=AGENTS_SDK_REVIEW_SCHEMA, alias="schema"
-    )
+    # Required, with no default: a document without its version marker is rejected
+    # rather than read as v1. ``build_review_report`` supplies it.
+    schema_id: Literal["mergecraft.agents-sdk-review.v1"] = Field(alias="schema")
     status: ReviewStatus
     reason: str | None = Field(
         default=None, description="Why the review was skipped or failed; null when reviewed."
@@ -110,6 +110,7 @@ def build_review_report(
     """
     guarded, dropped = filter_guarded_findings(output, allowed_paths=allowed_paths)
     return AgentsSdkReviewReport(
+        schema_id=AGENTS_SDK_REVIEW_SCHEMA,
         status="reviewed",
         pull_request=pull_request,
         base_sha=base_sha,
