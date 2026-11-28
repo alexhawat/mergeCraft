@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mergecraft.agents_sdk.report`: a versioned report document
+  (`mergecraft.agents-sdk-review.v1`) for an Agents SDK pull-request review, with
+  `build_review_report` to apply the guardrails and wrap the agent's output, and
+  `render_review_markdown` to render it as an escaped mergeCraft review message.
+  A workflow without a GitHub token writes the document as the
+  `mergecraft-agents-sdk-review` artifact and a publisher that holds the login
+  posts it ([Agents SDK docs](docs/agents-sdk.md)).
+
 ### Fixed
 
 - Re-running a review on a commit mergeCraft already reviewed no longer fails the
