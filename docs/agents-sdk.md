@@ -141,13 +141,13 @@ from mergecraft.agents_sdk.report import (
 )
 
 report = build_review_report(
-    result.final_output,              # ReviewFindingsReport from Runner.run
-    allowed_paths=ALLOWED,            # the files whose diff the agent was given
+    result.final_output,  # ReviewFindingsReport from Runner.run
+    allowed_paths=ALLOWED,  # the files whose diff the agent was given
     model="openai/gpt-5.6-terra",
     pull_request=42,
     base_sha=base,
     head_sha=head,
-    omitted_files=["uv.lock"],        # listed to the agent without content
+    omitted_files=["uv.lock"],  # listed to the agent without content
     usage=ReviewUsage(requests=7, input_tokens=120_000, output_tokens=4_000),
 )
 Path(AGENTS_SDK_REVIEW_FILENAME).write_text(report.to_json())

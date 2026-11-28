@@ -14,19 +14,16 @@ publisher must treat it as untrusted text: ``render_review_markdown`` escapes
 Markdown and HTML, neutralises mentions and caps its length.
 """
 
-from __future__ import annotations
-
+# No ``from __future__ import annotations``: Pydantic resolves the field types
+# below at class creation, so the imported types are needed at runtime anyway.
 import re
-from typing import TYPE_CHECKING, Final, Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.agents_sdk.guardrails import filter_guarded_findings
-from mergecraft.agents_sdk.types import ReviewFinding  # noqa: TC001 — Pydantic field type
+from mergecraft.agents_sdk.types import ReviewFinding, ReviewFindingsReport
 from mergecraft.findings.severity import BLOCKING_SEVERITIES, severity_rank
-
-if TYPE_CHECKING:
-    from mergecraft.agents_sdk.types import ReviewFindingsReport
 
 AGENTS_SDK_REVIEW_SCHEMA: Final = "mergecraft.agents-sdk-review.v1"
 # The workflow artifact name and the JSON file inside it.
