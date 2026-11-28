@@ -10,7 +10,7 @@ from mergecraft.classify.blast_radius import BlastRadiusClassification, LaneReas
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.mcp.tool_state import CiEvidenceState, TerminalSubmission, init_tool_state
 from mergecraft.merge_attention.compose import (
     MergeAttentionInputs,
     attach_merge_attention_to_packet,
@@ -91,7 +91,15 @@ def test_verification_gap_for_ui_without_proof() -> None:
 
 def test_inputs_from_context_collects_pr_body_and_summary(tmp_path) -> None:
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
-    state.terminal_submission = type("S", (), {"summary": "Shipped with screenshot."})()
+    state.terminal_submission = TerminalSubmission(
+        id="term-1",
+        verdict="approve",
+        summary="Shipped with screenshot.",
+        findings=[],
+        payload_hash="abc123",
+        submitted_at="2026-11-28T00:00:00Z",
+        attempt_id=1,
+    )
     ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -116,6 +124,43 @@ def test_inputs_from_context_collects_pr_body_and_summary(tmp_path) -> None:
     assert inputs.pr_body
     assert "proof" in inputs.pr_body
     assert inputs.review_summary == "Shipped with screenshot."
+
+
+def test_inputs_from_context_uses_base_branch_run_artifact_names(tmp_path) -> None:
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.ci_evidence = CiEvidenceState(
+        base_branch_runs=[
+            {
+                "ref": "main@abc1234",
+                "conclusion": "success",
+                "run_id": 99,
+                "fingerprint": "fp-demo",
+                "artifact": "walkthrough-demo.mp4",
+            },
+        ]
+    )
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="unknown")),
+        github=GitHubClient(token="test-token"),
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=state,
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+        trust_tier="trusted",
+    )
+    inputs = inputs_from_context(ctx)
+    assert list(inputs.artifact_names or ()) == ["walkthrough-demo.mp4"]
+    section = compose_merge_attention(
+        _packet(files_changed=["src/components/Panel.tsx"]),
+        inputs=MergeAttentionInputs(analyzer_ran=True, artifact_names=inputs.artifact_names),
+    )
+    verification = next(row for row in section.axes if row.axis == "verification")
+    assert not verification.verification_gaps
 
 
 def test_attach_merge_attention_to_packet_when_enabled(tmp_path) -> None:

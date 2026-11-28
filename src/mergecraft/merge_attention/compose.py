@@ -280,6 +280,30 @@ def compose_merge_attention(
     return MergeAttentionSection(overall=overall, axes=axes)
 
 
+def _artifact_names_from_base_branch_runs(
+    rows: Sequence[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Basenames for e2e proof from base-branch CI attribution rows (#891).
+
+    Reads ``ci_evidence.base_branch_runs`` only; PR-head workflow artifacts are
+    intentionally out of scope for merge-attention proof ingest.
+    """
+    names: list[str] = []
+    for row in rows:
+        artifact = row.get("artifact")
+        if isinstance(artifact, str) and artifact.strip():
+            names.append(artifact.strip())
+        name = row.get("name")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+        listed = row.get("artifacts")
+        if isinstance(listed, list):
+            for item in listed:
+                if isinstance(item, str) and item.strip():
+                    names.append(item.strip())
+    return tuple(dict.fromkeys(names))
+
+
 def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
     """Gather run-local evidence for merge-attention composition."""
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -313,10 +337,9 @@ def inputs_from_context(ctx: ToolContext) -> MergeAttentionInputs:
         summary = str(getattr(state.terminal_submission, "summary", "") or "") or None
     artifact_names: list[str] = []
     if state.ci_evidence is not None:
-        for row in state.ci_evidence.base_branch_runs:
-            name = row.get("name") or row.get("artifact")
-            if isinstance(name, str) and name.strip():
-                artifact_names.append(name.strip())
+        artifact_names.extend(
+            _artifact_names_from_base_branch_runs(state.ci_evidence.base_branch_runs)
+        )
     run_artifacts: list[str] = []
     evidence_dir = getattr(ctx, "tmpdir", None) or getattr(state, "evidence_dir", None)
     if evidence_dir is not None:
