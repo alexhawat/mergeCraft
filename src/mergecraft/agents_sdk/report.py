@@ -53,7 +53,12 @@ class AgentsSdkReviewReport(BaseModel):
 
     # Required, with no default: a document without its version marker is rejected
     # rather than read as v1. ``build_review_report`` supplies it.
-    schema_id: Literal["mergecraft.agents-sdk-review.v1"] = Field(alias="schema")
+    # Read and written as ``schema``, set as ``schema_id`` in Python: separate
+    # validation and serialization aliases keep the constructor keyword the field
+    # name for both mypy's Pydantic plugin and pyright.
+    schema_id: Literal["mergecraft.agents-sdk-review.v1"] = Field(
+        validation_alias="schema", serialization_alias="schema"
+    )
     status: ReviewStatus
     reason: str | None = Field(
         default=None, description="Why the review was skipped or failed; null when reviewed."
