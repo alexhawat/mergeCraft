@@ -124,6 +124,69 @@ When mergeCraft tracing is enabled (``MERGECRAFT_TRACING`` / ``docs/TRACING.md``
 tool spans emit through the existing tracer and ``attach_trace_context`` bridges
 OpenTelemetry/Logfire when the ``[tracing]`` extra is installed.
 
+## Publishing a review from a workflow without a GitHub token
+
+A workflow that reviews with the Agents SDK often has no GitHub token, so it
+cannot post the review on the pull request itself. Write the review as a
+versioned report document instead and let a publisher that holds the GitHub
+login post it, for example a self-hosted CI service that collects the job's
+artifacts:
+
+```python
+from mergecraft.agents_sdk.report import (
+    AGENTS_SDK_REVIEW_FILENAME,
+    ReviewUsage,
+    build_review_report,
+    render_review_markdown,
+)
+
+report = build_review_report(
+    result.final_output,  # ReviewFindingsReport from Runner.run
+    allowed_paths=ALLOWED,  # the files whose diff the agent was given
+    model="openai/gpt-5.6-terra",
+    pull_request=42,
+    base_sha=base,
+    head_sha=head,
+    omitted_files=["uv.lock"],  # listed to the agent without content
+    usage=ReviewUsage(requests=7, input_tokens=120_000, output_tokens=4_000),
+)
+Path(AGENTS_SDK_REVIEW_FILENAME).write_text(report.to_json())
+Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(render_review_markdown(report))
+```
+
+Upload the file as the workflow artifact ``mergecraft-agents-sdk-review``
+(``AGENTS_SDK_REVIEW_ARTIFACT``), with the JSON file at the artifact's root.
+
+``build_review_report`` applies ``filter_guarded_findings`` first, so the
+document carries the guarded findings and, in ``dropped``, why any were removed.
+A review that could not run is a document too:
+``AgentsSdkReviewReport(schema_id=AGENTS_SDK_REVIEW_SCHEMA, status="error",
+reason=..., head_sha=head)`` or ``status="skipped"``. ``report.passed()`` is false for an error or any Critical
+or Major finding.
+
+The document (schema ``mergecraft.agents-sdk-review.v1``):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `schema` | string | Required; always `mergecraft.agents-sdk-review.v1`. A document without it is rejected. |
+| `status` | `reviewed`, `skipped` or `error` | Whether a review completed. |
+| `reason` | string or null | Why it was skipped or failed. |
+| `pull_request` | integer or null | The pull request number. |
+| `base_sha`, `head_sha` | string or null | The compared commits; publishers bind the message to `head_sha`. |
+| `model` | string or null | The model slug that reviewed. |
+| `summary` | string | The reviewer's summary, after secret redaction. |
+| `findings` | list | `ReviewFinding` rows: `severity`, `file`, `line`, `message`, `suggested_fix`. |
+| `dropped` | list of strings | Why the guardrails removed findings. |
+| `changed_files` | list of strings | Files whose diff the reviewer was given. |
+| `omitted_files` | list of strings | Changed files listed without content (lockfiles, generated files). |
+| `usage` | object or null | `requests`, `input_tokens`, `output_tokens`. |
+
+Unknown keys are rejected. Every string in the document came from a model that
+read pull-request content: a publisher must escape it before rendering and must
+not treat the document as proof that a review ran, only as the workflow's claim.
+``render_review_markdown`` escapes Markdown and HTML, neutralises mentions and
+caps the message at 60,000 characters.
+
 ## Example
 
 Runnable loop: ``examples/agents-sdk/review_loop.py`` (see ``examples/agents-sdk/README.md``).

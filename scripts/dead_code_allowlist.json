@@ -257,6 +257,7 @@
       "src/mergecraft/agents/registry.py:variable:recorded_model",
       "src/mergecraft/agents/shared.py:variable:terminal_submission_id",
       "src/mergecraft/agents_sdk/loop.py:variable:final_report",
+      "src/mergecraft/agents_sdk/report.py:variable:schema_id",
       "src/mergecraft/agents_sdk/loop.py:variable:guardrail_violations",
       "src/mergecraft/analyzers/pattern.py:variable:ruleset_name",
       "src/mergecraft/analyzers/pattern.py:variable:ruleset_source",
@@ -489,6 +490,7 @@
   {
     "reason": "Public query, rendering, taxonomy and memory facade methods remain supported for callers and compatibility tests outside the production scan. They are not framework callbacks.",
     "symbols": [
+      "src/mergecraft/agents_sdk/report.py:method:to_json",
       "src/mergecraft/agents_sdk/types.py:method:severity_values",
       "src/mergecraft/analyzers/trust_posture.py:method:may_run_full_analyzers",
       "src/mergecraft/evidence/packet.py:method:is_required",
